@@ -1,0 +1,38 @@
+# ============================================================
+#  MotoMami - Configuración Central (EJEMPLO)
+#  Copia este archivo a config.ini y rellena tus credenciales
+# ============================================================
+
+[thingsboard]
+host = mqtt.thingsboard.cloud
+token = YOUR_THINGSBOARD_TOKEN
+publish_interval = 5
+
+[emqx]
+host = your-emqx-broker.emqxsl.com
+port = 8883
+username = your_emqx_username
+password = YOUR_EMQX_PASSWORD
+client_id = raspi_motomami
+
+[gps]
+at_port = /dev/ttyUSB2
+nmea_port = /dev/ttyUSB1
+baud = 115200
+map_zoom = 16
+max_route_points = 50
+
+[paths]
+music_dir = /home/motomami/music
+movies_dir = /home/motomami/movies
+
+[display]
+fb1 = /dev/fb1
+fb2 = /dev/fb2
+width = 320
+height = 240
+
+[system]
+telemetry_interval = 5
+gps_refresh_interval = 2
+map_tile_cache = /tmp/maptiles

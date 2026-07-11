@@ -1,0 +1,18 @@
+# Credenciales y configuracion sensible
+config.ini
+.agents/rules/laconexion.md
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos virtuales
+venv/
+.venv/
+env/
+
+# Directorios del sistema
+.DS_Store
+Thumbs.db
