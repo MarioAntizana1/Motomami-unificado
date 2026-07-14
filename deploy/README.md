@@ -4,14 +4,14 @@
 
 - Raspberry Pi con RPi OS Lite (o cualquier variante)
 - Python 3.14+, pip, dependencias instaladas
-- Repositorio clonado en `/home/motomami/motomami-ultimate`
+- Repositorio clonado en `/home/motomami/moto`
 - `config.ini` configurado con tus credenciales
 
 ## Instalación
 
 ```bash
 # 1. Copiar el archivo de servicio
-sudo cp motomami.service /etc/systemd/system/
+sudo cp /home/motomami/moto/deploy/motomami.service /etc/systemd/system/
 
 # 2. Recargar systemd
 sudo systemctl daemon-reload
