@@ -8,6 +8,7 @@ Sistema de infoentretenimiento para **Raspberry Pi Zero 2W** con pantallas duale
 ├── src/          # Código unificado (nuevo) - servicios concurrentes con SystemState
 ├── final/        # Código legacy - basado en procesos separados + fb_daemon
 ├── tools/        # Utilidades (prefetch de tiles OSM)
+├── deploy/       # Instalación con systemd (arranque automático)
 └── .agents/      # Reglas para asistentes de IA (opencode)
 ```
 

@@ -17,6 +17,7 @@
 - `final/` - código **legacy** (procesos separados con fork)
 - `tools/` - utilidades auxiliares
 - `config.ini.example` - plantilla de configuración (copiar a `config.ini`)
+- `deploy/` - archivos para instalación (systemd service, instrucciones)
 
 ## Reglas
 
@@ -32,6 +33,11 @@
 sudo python3 src/main.py                     # Iniciar sistema unificado
 sudo python3 final/src/main.py               # Iniciar sistema legacy
 sudo python3 final/src/tests/test_gmt020_dual.py  # Test pantallas
+
+# systemd (arranque automático)
+sudo systemctl start motomami                # Iniciar servicio
+sudo systemctl enable motomami               # Habilitar en boot
+sudo journalctl -u motomami -f               # Ver logs
 ```
 
 ## Workflow

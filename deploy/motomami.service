@@ -1,0 +1,18 @@
+[Unit]
+Description=MotoMami Ultimate - Sistema de infoentretenimiento para moto
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/motomami/motomami-ultimate
+ExecStart=/usr/bin/python3 /home/motomami/motomami-ultimate/src/main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
