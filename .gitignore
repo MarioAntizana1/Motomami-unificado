@@ -1,6 +1,7 @@
 # Credenciales y configuracion sensible
 config.ini
 .agents/rules/laconexion.md
+opencode.json
 
 # Python cache
 __pycache__/
@@ -16,3 +17,9 @@ env/
 # Directorios del sistema
 .DS_Store
 Thumbs.db
+
+# Graphify output
+graphify-out/
+
+# Sincronizacion local
+Users/

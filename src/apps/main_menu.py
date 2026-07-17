@@ -21,6 +21,9 @@ APPS = [
     {"name": "Video",          "key": "video",   "color": (255, 200,  50)},
     {"name": "Camara Vivo",    "key": "camera",  "color": (255, 100, 100)},
     {"name": "Doom",           "key": "doom",    "color": (255,  50,  50)},
+    {"name": "GPS Diagnostico","key": "gps_diag","color": (  0, 255,  80)},
+    {"name": "Conexiones",     "key": "conex",   "color": ( 80, 180, 255)},
+    {"name": "Bluetooth",      "key": "bt_mgr",  "color": (180,  80, 255)},
     {"name": "Telemetria",     "key": "telem",   "color": ( 50, 200, 255)},
     {"name": "SALIR",          "key": "exit",    "color": (150, 150, 150)},
 ]

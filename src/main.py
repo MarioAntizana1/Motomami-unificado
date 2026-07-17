@@ -25,6 +25,9 @@ from apps.main_menu import MainMenu
 from apps.gps_display_app import GPSDisplayApp
 from apps.video_player_app import VideoPlayerApp
 from apps.android_auto_app import AndroidAutoApp
+from apps.gps_diag_app import GPSDiagApp
+from apps.connections_app import ConnectionsApp
+from apps.bluetooth_manager_app import BluetoothManagerApp
 
 class MotoMamiSystem:
     def __init__(self):
@@ -103,6 +106,18 @@ class MotoMamiSystem:
                     print("[Main] Lanzando Doom App")
                     from apps.doom_app import DoomApp
                     app = DoomApp(self.input_mgr, self.state)
+                    app.run()
+                elif app_key == "gps_diag":
+                    print("[Main] Lanzando GPS Diagnostico")
+                    app = GPSDiagApp(self.input_mgr, self.state)
+                    app.run()
+                elif app_key == "conex":
+                    print("[Main] Lanzando Conexiones")
+                    app = ConnectionsApp(self.input_mgr, self.state)
+                    app.run()
+                elif app_key == "bt_mgr":
+                    print("[Main] Lanzando Bluetooth Manager")
+                    app = BluetoothManagerApp(self.input_mgr, self.state)
                     app.run()
                 elif app_key == "telem":
                     # Si tuvieras una app para visualizar la telemetría, se lanzaría aquí.
