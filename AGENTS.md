@@ -3,13 +3,15 @@
 ## Stack
 
 - Python 3.x, Raspberry Pi Zero 2W
-- Pantallas: ST7789 SPI (240x320), framebuffer `/dev/fb1`, `/dev/fb2`
+- Pantallas: ST7789 SPI (240x320), framebuffer `/dev/fb1` (inferior), `/dev/fb2` (superior) — apiladas verticalmente
+  - El canvas 640x240 mapea: izquierda (x:0-319) → fb1 (abajo), derecha (x:320-639) → fb2 (arriba)
 - GPS: SIM7600-G vía AT commands
 - MQTT: ThingsBoard cloud + Mosquitto local
 - Audio: pygame.mixer / ALSA / Fiio DAC
 - Video: ffmpeg (frame extraction)
-- Botones: GPIO 13, 26, 5, 6, 12, 16
-- Mando: Xbox Bluetooth
+- Botones: GPIO 13 (UP), 26 (DOWN), 5 (RIGHT), 6 (LEFT), 12 (ENTER), 16 (BACK)
+- Mando: Xbox Bluetooth (mapeado a UP/DOWN/LEFT/RIGHT/ENTER/BACK via InputManager)
+- **Sin teclado** — todas las interacciones deben funcionar solo con botones GPIO y mando Xbox (UP/DOWN/ENTER/BACK)
 
 ## Estructura
 
