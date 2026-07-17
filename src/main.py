@@ -75,6 +75,11 @@ class MotoMamiSystem:
         self.input_mgr.stop()
         print("[Main] Sistema detenido de forma segura.")
 
+    def _restart(self):
+        print("[Main] Reiniciando sistema...")
+        self.shutdown()
+        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+
     def run(self):
         self.start_services()
         
@@ -124,8 +129,7 @@ class MotoMamiSystem:
                     print("[Main] App de telemetría no tiene interfaz gráfica actualmente.")
                     time.sleep(1)
                 elif app_key == "exit":
-                    print("[Main] Saliendo...")
-                    break
+                    self._restart()
         except Exception as e:
             print(f"[Main] Error fatal en la UI: {e}")
         finally:
