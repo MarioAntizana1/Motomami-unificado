@@ -59,8 +59,9 @@ class GPSService(threading.Thread):
             return
 
         print(f"[GPSService] Conectando a {GPS_AT_PORT}...")
-        self._gps = SIM7600GPS(at_port=GPS_AT_PORT, baudrate=GPS_BAUD, auto_start=True)
+        self._gps = SIM7600GPS(at_port=GPS_AT_PORT, baudrate=GPS_BAUD)
         self._gps.set_callback(self._on_gps_data)
+        self._gps.start()
         self._connected = True
         print("[GPSService] GPS activo. Esperando fix...")
 
