@@ -184,8 +184,12 @@ class GPSDisplayApp:
                   fill=C_GREEN if has_fix else (C_YELLOW if using_cache else C_RED))
 
         if gps.gps_time and len(gps.gps_time) >= 6:
+            from datetime import datetime, timedelta, timezone
             t = gps.gps_time
-            draw.text((W - 90, 3), f"{t[:2]}:{t[2:4]}:{t[4:6]}", font=self._f_small, fill=C_BLUE)
+            h, m, s = int(t[:2]), int(t[2:4]), int(t[4:6])
+            utc_dt = datetime(2000, 1, 1, h, m, s, tzinfo=timezone.utc)
+            lt = utc_dt.astimezone(timezone(timedelta(hours=-5)))
+            draw.text((W - 90, 3), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C_BLUE)
 
         # ── Velocidad ──
         y = 28

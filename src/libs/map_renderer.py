@@ -153,8 +153,8 @@ class MapRenderer:
 
                     if tile_img:
                         # Posición en píxeles del tile en el canvas
-                        pos_x = tx * 256 - offset_x - (self.width // 2)
-                        pos_y = ty * 256 - offset_y - (self.height // 2)
+                        pos_x = (tx - tiles_across // 2) * 256 - offset_x + self.width // 2
+                        pos_y = (ty - tiles_down // 2) * 256 - offset_y + self.height // 2
 
                         # Solo pegar si está dentro del canvas
                         if (pos_x + 256 > 0 and pos_x < self.width and
