@@ -117,7 +117,7 @@ class TelemetriaService(threading.Thread):
             "track_angle": gps.track_angle,
             "satellites": gps.num_satellites,
             "gps_fix": 1 if gps.has_fix else 0,
-            "gps_cached": 0 if gps.has_fix else (1 if gps.cached_has_fix else 0),
+            "gps_cached": 0 if (gps.has_fix and gps.lat != 0.0) else (1 if gps.cached_has_fix else 0),
         }
 
     # ── Publicación ──

@@ -279,6 +279,7 @@ class SIM7600GPS:
     def _read_loop(self):
         """Bucle de lectura de datos GPS"""
         last_info_time = 0
+        last_cb_time = 0
 
         while self.running and self.serial and self.serial.is_open:
             try:
@@ -291,6 +292,11 @@ class SIM7600GPS:
 
                 # También leer NMEA del puerto (si hay datos)
                 self._read_nmea()
+
+                # Callback único ~1s con datos combinados (CGPSINFO + NMEA)
+                if self._callback and now - last_cb_time >= 1.0:
+                    self._callback(self.data)
+                    last_cb_time = now
 
                 time.sleep(0.05)  # Pequeña pausa para no saturar CPU
 
@@ -352,8 +358,6 @@ class SIM7600GPS:
         resp = self._send_at("AT+CGPSINFO", timeout=2.0)
         if resp is None:
             self.data.has_fix = False
-            if self._callback:
-                self._callback(self.data)
             return
 
         # Buscar el dato en la respuesta
@@ -393,9 +397,6 @@ class SIM7600GPS:
                 # También pedir número de satélites
                 self._request_satellites()
 
-                if self._callback:
-                    self._callback(self.data)
-
                 lat_dd, lon_dd = self.data.get_coordinates_decimal()
                 print(f"[SIM7600-GPS] Posicion: {lat_dd:.6f}, {lon_dd:.6f} | "
                       f"Alt:{alt_val:.1f}m Vel:{speed_val:.1f}km/h", flush=True)
@@ -408,9 +409,6 @@ class SIM7600GPS:
             if self.data.has_fix:
                 print("[SIM7600-GPS] Perdida de señal GPS...")
             self.data.has_fix = False
-
-        if self._callback:
-            self._callback(self.data)
 
     def _request_satellites(self):
         """Pide cantidad de satélites visibles"""
@@ -488,9 +486,10 @@ class SIM7600GPS:
                 self.data.num_satellites = int(parts[7]) if parts[7] else 0
                 self.data.altitude = float(parts[9]) if parts[9] else 0.0
                 self.data.has_fix = int(parts[6]) > 0 if parts[6] else False
+                self.data.received_at = time.time()
         except (ValueError, IndexError):
             pass
-
+    
     def _parse_nmea_gsv(self, line: str):
         """$GPGSV,3,1,12,10,34,008,22,18,45,163,37,..."""
         parts = line.split(',')
@@ -518,6 +517,7 @@ class SIM7600GPS:
                 speed_knots = float(parts[7]) if parts[7] else 0.0
                 self.data.speed_kmh = speed_knots * 1.852
                 self.data.track_angle = float(parts[8]) if parts[8] else 0.0
+                self.data.received_at = time.time()
         except (ValueError, IndexError):
             pass
 
