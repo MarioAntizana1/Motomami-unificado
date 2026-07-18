@@ -8,7 +8,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config_loader import GPS_AT_PORT, GPS_BAUD
+from config_loader import GPS_AT_PORT, GPS_NMEA_PORT, GPS_BAUD
 
 # Intentar importar el driver real; si no, usar stub
 _DRIVERS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "drivers")
@@ -59,7 +59,7 @@ class GPSService(threading.Thread):
             return
 
         print(f"[GPSService] Conectando a {GPS_AT_PORT}...")
-        self._gps = SIM7600GPS(at_port=GPS_AT_PORT, baudrate=GPS_BAUD)
+        self._gps = SIM7600GPS(at_port=GPS_AT_PORT, nmea_port=GPS_NMEA_PORT, baudrate=GPS_BAUD)
         self._gps.set_callback(self._on_gps_data)
         self._gps.start()
         self._connected = True

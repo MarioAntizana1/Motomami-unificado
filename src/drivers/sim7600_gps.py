@@ -89,15 +89,18 @@ class SIM7600GPS:
     """
 
     # Patrones de respuesta
+    # Formato AT+CGPSINFO:
+    #   +CGPSINFO: <lat>,<ns>,<lon>,<ew>,<date>,<time>,<alt>,<speed>,<course>
+    #   date=DDMMYY (6 digitos, SIN punto), time=HHMMSS.SS, speed=knots, course=degrees
     RE_CGPSINFO = re.compile(
         r'\+CGPSINFO:\s*'
         r'([\d.]*),([NS]),'       # lat, dir
         r'([\d.]*),([EW]),'       # lon, dir
-        r'(\d{6}\.\d*),'          # fecha (DDMMYY)
-        r'(\d{6}\.\d*),'          # hora (HHMMSS.SS)
-        r'([\d.]*),'              # altitud
-        r'([\d.]*),'              # speed (km/h)
-        r'([\d.]*)'               # track angle
+        r'(\d{6}),'               # fecha DDMMYY (sin decimal)
+        r'(\d{6}\.\d*),'          # hora HHMMSS.SS
+        r'([\d.]*),'              # altitud (metros)
+        r'([\d.]*),'              # speed (knots)
+        r'([\d.]*)'               # track angle (grados)
     )
 
     RE_CGPSSTATUS = re.compile(
@@ -107,12 +110,15 @@ class SIM7600GPS:
     def __init__(
         self,
         at_port: str = "/dev/ttyUSB2",
+        nmea_port: str = "/dev/ttyUSB1",
         baudrate: int = 115200,
     ):
         self.at_port = at_port
+        self.nmea_port = nmea_port
         self.baudrate = baudrate
 
         self.serial = None
+        self.nmea_serial = None
         self.running = False
         self.thread = None
         self.lock = threading.Lock()
@@ -149,6 +155,11 @@ class SIM7600GPS:
             if self.serial and self.serial.is_open:
                 self._send_at("AT+CGPS=0")  # Apagar GPS
                 self.serial.close()
+        except:
+            pass
+        try:
+            if self.nmea_serial and self.nmea_serial.is_open:
+                self.nmea_serial.close()
         except:
             pass
         print("[SIM7600-GPS] Detenido")
@@ -364,6 +375,7 @@ class SIM7600GPS:
                 alt_val = float(alt_str) if alt_str else 0.0
                 speed_val = float(speed_str) if speed_str else 0.0
                 track_val = float(track_str) if track_str else 0.0
+                speed_kmh_val = speed_val * 1.852  # CGPSINFO devuelve knots
 
                 with self.lock:
                     self.data.latitude = lat_val
@@ -373,7 +385,7 @@ class SIM7600GPS:
                     self.data.date = date_str
                     self.data.time = time_str
                     self.data.altitude = alt_val
-                    self.data.speed_kmh = speed_val
+                    self.data.speed_kmh = speed_kmh_val
                     self.data.track_angle = track_val
                     self.data.has_fix = True
                     self.data.received_at = time.time()
@@ -417,13 +429,31 @@ class SIM7600GPS:
                     pass
 
     def _read_nmea(self):
-        """Lee tramas NMEA del puerto (datos GPS crudos)"""
-        if not self.serial or not self.serial.is_open:
-            return
+        """Lee tramas NMEA del puerto NMEA (/dev/ttyUSB1)."""
+        # Abrir puerto NMEA si no está abierto
+        if not self.nmea_serial or not self.nmea_serial.is_open:
+            try:
+                self.nmea_serial = serial.Serial(
+                    port=self.nmea_port,
+                    baudrate=self.baudrate,
+                    timeout=0.5,
+                    bytesize=serial.EIGHTBITS,
+                    parity=serial.PARITY_NONE,
+                    stopbits=serial.STOPBITS_ONE,
+                )
+                print(f"[SIM7600-GPS] Puerto NMEA {self.nmea_port} abierto")
+            except serial.SerialException as e:
+                if self.nmea_serial:
+                    try:
+                        self.nmea_serial.close()
+                    except:
+                        pass
+                    self.nmea_serial = None
+                return
 
         try:
-            while self.serial.in_waiting > 50:  # Solo si hay suficientes datos
-                line = self.serial.readline()
+            while self.nmea_serial.in_waiting > 0:
+                line = self.nmea_serial.readline()
                 if not line:
                     break
 
@@ -432,11 +462,12 @@ class SIM7600GPS:
                 except:
                     continue
 
-                # Procesar tramas NMEA de interés
                 if line_str.startswith("$GPGGA") or line_str.startswith("$GNGGA"):
                     self._parse_nmea_gga(line_str)
                 elif line_str.startswith("$GPGSV") or line_str.startswith("$GNGSV"):
                     self._parse_nmea_gsv(line_str)
+                elif line_str.startswith("$GPRMC") or line_str.startswith("$GNRMC"):
+                    self._parse_nmea_rmc(line_str)
 
         except serial.SerialException:
             pass
@@ -469,6 +500,26 @@ class SIM7600GPS:
                 self.data.num_satellites = max(self.data.num_satellites, sats_in_view)
             except (ValueError, IndexError):
                 pass
+
+    def _parse_nmea_rmc(self, line: str):
+        """$GPRMC,123456.00,A,4809.1234,N,01131.5678,E,30.5,220.3,150626,..."""
+        parts = line.split(',')
+        if len(parts) < 9:
+            return
+        try:
+            with self.lock:
+                status = parts[2] if len(parts) > 2 else "V"
+                self.data.has_fix = (status == "A")
+                if parts[3] and parts[5]:
+                    self.data.latitude = float(parts[3]) if parts[3] else 0.0
+                    self.data.lat_direction = parts[4]
+                    self.data.longitude = float(parts[5]) if parts[5] else 0.0
+                    self.data.lon_direction = parts[6]
+                speed_knots = float(parts[7]) if parts[7] else 0.0
+                self.data.speed_kmh = speed_knots * 1.852
+                self.data.track_angle = float(parts[8]) if parts[8] else 0.0
+        except (ValueError, IndexError):
+            pass
 
 
 # ═══════════════════════════════════════════════════════
