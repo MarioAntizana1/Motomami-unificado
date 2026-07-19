@@ -50,7 +50,7 @@ DISP_H   = _cfg.getint("display", "height", fallback=240)
 
 # ── Sistema ──
 TELEMETRY_INTERVAL = _cfg.getint("system", "telemetry_interval",   fallback=5)
-GPS_REFRESH        = _cfg.getfloat("system", "gps_refresh_interval", fallback=2.0)
+GPS_REFRESH        = _cfg.getfloat("system", "gps_refresh_interval", fallback=1.0)
 MAP_TILE_CACHE     = _cfg.get("system", "map_tile_cache", fallback="/tmp/maptiles")
 
 def summary():
