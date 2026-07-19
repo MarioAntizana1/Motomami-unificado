@@ -213,6 +213,7 @@ class BluetoothManagerApp:
         elif action == "ENTER":
             if self._paired:
                 self._screen = "dev_detail"
+                self._dev_action_idx = 0
                 self._draw_dev_detail()
         elif action == "BACK":
             self._screen = "main"
@@ -233,6 +234,35 @@ class BluetoothManagerApp:
         audio_ports = self._get_audio_ports(mac)
         current_sink = self._run_cmd(["pactl", "get-default-sink"], timeout=2).strip()
 
+        self._dev_detail_mac = mac
+        self._dev_detail_class = dev_class
+
+        is_bt_sink = False
+        sinks = self._list_sinks()
+        for s in sinks:
+            if mac.replace(":", "_") in s["name"] or d["name"].lower().replace(" ", "_") in s["name"]:
+                is_bt_sink = True
+                break
+        self._dev_detail_bt_sink = is_bt_sink
+
+        can_audio = dev_class == "audio" or is_bt_sink or bool(audio_ports)
+
+        self._dev_detail_actions = []
+        if connected:
+            self._dev_detail_actions.append(("DESCONECTAR", "_toggle"))
+            if can_audio:
+                if is_bt_sink and current_sink and mac.replace(":", "_") in current_sink:
+                    self._dev_detail_actions.append(("AUDIO: ACTIVO", "_noop"))
+                else:
+                    self._dev_detail_actions.append(("USAR COMO AUDIO", "_audio"))
+        else:
+            self._dev_detail_actions.append(("CONECTAR", "_toggle"))
+            if can_audio:
+                self._dev_detail_actions.append(("CONECTAR + AUDIO", "_connect_audio"))
+        self._dev_detail_actions.append(("VOLVER", "_back"))
+        if self._dev_action_idx >= len(self._dev_detail_actions):
+            self._dev_action_idx = 0
+
         lines = []
         lines.append(f"=== {d['name']} ===")
         lines.append(f"")
@@ -244,77 +274,80 @@ class BluetoothManagerApp:
             lines.append("Perfiles audio:")
             for p in audio_ports:
                 lines.append(f"  {p}")
-        is_bt_sink = False
-        sinks = self._list_sinks()
-        for s in sinks:
-            if mac.replace(":", "_") in s["name"] or d["name"].lower().replace(" ", "_") in s["name"]:
-                is_bt_sink = True
-                break
         lines.append("")
-        lines.append("Acciones:")
-        if connected:
-            lines.append("[E] Desconectar")
-            if dev_class == "audio" or is_bt_sink or audio_ports:
-                if is_bt_sink and current_sink and mac.replace(":", "_") in current_sink:
-                    lines.append("[A] Audio: ACTIVO ahora")
-                else:
-                    lines.append("[A] Usar como salida audio")
-        else:
-            lines.append("[E] Conectar")
+        for i, (label, _) in enumerate(self._dev_detail_actions):
+            sel = ">" if i == self._dev_action_idx else " "
+            lines.append(f"{sel} {label}")
         lines.append("")
-        lines.append("[ENTER] Accion  BACK=Volver")
-        self._dev_detail_mac = mac
-        self._dev_detail_class = dev_class
-        self._dev_detail_bt_sink = is_bt_sink
-        self._draw_result(lines, "DETALLE", (180, 200, 255))
+        lines.append("ENTER=Seleccionar  BACK=Volver  ^v=Opcion")
+        self._draw_result(lines, "DETALLE", (180, 200, 255), highlight=self._dev_action_idx)
 
     _dev_detail_mac = ""
     _dev_detail_class = "unknown"
     _dev_detail_bt_sink = False
+    _dev_detail_actions = []
+    _dev_action_idx = 0
 
     def _handle_dev_detail(self, action):
-        if action == "ENTER":
+        if action == "UP":
+            self._dev_action_idx = max(0, self._dev_action_idx - 1)
+            self._draw_dev_detail()
+        elif action == "DOWN":
+            self._dev_action_idx = min(len(self._dev_detail_actions) - 1, self._dev_action_idx + 1)
+            self._draw_dev_detail()
+        elif action == "ENTER":
+            if self._dev_action_idx >= len(self._dev_detail_actions):
+                return
+            _, cmd = self._dev_detail_actions[self._dev_action_idx]
             mac = self._dev_detail_mac
-            connected = self._is_connected(mac)
             dev_class = self._dev_detail_class
             is_bt_sink = self._dev_detail_bt_sink
 
-            if connected:
+            if cmd == "_toggle":
+                connected = self._is_connected(mac)
                 self._screen = "result"
-                self._btctl(f"disconnect {mac}", timeout=5)
-                self._show_result(f"Desconectado:\n{mac}")
-                self._load_paired()
-            else:
-                self._screen = "result"
-                out = self._btctl(f"connect {mac}", timeout=12)
-                if "Connection successful" in out or "Connected: yes" in out:
-                    self._show_result(f"Conectado!\n{mac}")
-                    if dev_class == "audio" or is_bt_sink:
-                        time.sleep(1)
-                        sinks = self._list_sinks()
-                        for s in sinks:
-                            if mac.replace(":", "_") in s["name"]:
-                                self._set_default_sink(s["name"])
-                                self._show_result(f"Conectado + Audio\ncambiado a {s['name'][:20]}")
-                                break
+                if connected:
+                    self._btctl(f"disconnect {mac}", timeout=5)
+                    self._show_result(f"Desconectado:\n{mac}")
                 else:
-                    err = out.replace("\n", " ")[:60]
-                    self._show_result(f"Fallo conexion:\n{err}")
+                    out = self._btctl(f"connect {mac}", timeout=12)
+                    if "Connection successful" in out or "Connected: yes" in out:
+                        self._show_result(f"Conectado!\n{mac}")
+                    else:
+                        err = out.replace("\n", " ")[:60]
+                        self._show_result(f"Fallo:\n{err}")
                 self._load_paired()
-        elif action == "A":
-            mac = self._dev_detail_mac
-            sinks = self._list_sinks()
-            found = False
-            for s in sinks:
-                if mac.replace(":", "_") in s["name"]:
-                    self._set_default_sink(s["name"])
-                    self._screen = "result"
-                    self._show_result(f"Audio cambiado a:\n{s['name'][:20]}")
-                    found = True
-                    break
-            if not found:
+            elif cmd == "_audio":
                 self._screen = "result"
-                self._show_result(f"No se encontro sink\nBT para {mac}\n\nConectalo primero")
+                sinks = self._list_sinks()
+                found = False
+                for s in sinks:
+                    if mac.replace(":", "_") in s["name"]:
+                        self._set_default_sink(s["name"])
+                        self._show_result(f"Audio cambiado a:\n{s['name'][:20]}")
+                        found = True
+                        break
+                if not found:
+                    self._show_result(f"No se encontro sink\nBT para {mac}\n\nConectalo primero")
+            elif cmd == "_connect_audio":
+                self._screen = "result"
+                self._show_result(f"Conectando...")
+                out = self._btctl(f"connect {mac}", timeout=12)
+                time.sleep(1)
+                sinks = self._list_sinks()
+                found = False
+                for s in sinks:
+                    if mac.replace(":", "_") in s["name"]:
+                        self._set_default_sink(s["name"])
+                        self._show_result(f"Conectado! Audio en:\n{s['name'][:20]}")
+                        found = True
+                        break
+                if not found:
+                    self._show_result(f"Conectado pero no se\nencontro sink audio.")
+                self._load_paired()
+            elif cmd == "_back":
+                self._screen = "paired"
+                self._draw_paired()
         elif action == "BACK":
             self._screen = "paired"
             self._draw_paired()
@@ -372,6 +405,15 @@ class BluetoothManagerApp:
             self._start_scan()
             return
         d = self._discovered[0]
+        self._discovered_mac = d["mac"]
+        self._discovered_name = d["name"]
+        self._scan_actions = [
+            ("EMPAREJAR + CONECTAR", "_pair"),
+            ("EMPAREJAR + CONECTAR + AUDIO", "_pair_audio"),
+            ("VOLVER", "_back"),
+        ]
+        if self._scan_action_idx >= len(self._scan_actions):
+            self._scan_action_idx = 0
         lines = []
         lines.append(f"=== NUEVO DISPOSITIVO ===")
         lines.append("")
@@ -379,51 +421,62 @@ class BluetoothManagerApp:
         lines.append(f"MAC: {d['mac']}")
         lines.append("")
         lines.append("Acciones:")
-        lines.append("[E] Emparejar + Conectar")
-        lines.append("[A] Emparejar + Conectar")
-        lines.append("    y usar como audio")
+        for i, (label, _) in enumerate(self._scan_actions):
+            sel = ">" if i == self._scan_action_idx else " "
+            lines.append(f"{sel} {label}")
         lines.append("")
-        lines.append("[ENTER] Emparejar")
-        lines.append("[A] Emparejar + audio")
-        lines.append("[BACK] Volver")
-        self._discovered_mac = d["mac"]
-        self._discovered_name = d["name"]
-        self._draw_result(lines, "NUEVO", (100, 200, 255))
+        lines.append("ENTER=Ejecutar  BACK=Volver  ^v=Opcion")
+        self._draw_result(lines, "NUEVO", (100, 200, 255), highlight=self._scan_action_idx)
 
     _discovered_mac = ""
     _discovered_name = ""
+    _scan_actions = []
+    _scan_action_idx = 0
 
     def _handle_scan_dev(self, action):
         mac = self._discovered_mac
-        if action == "ENTER":
-            self._screen = "result"
-            self._show_result(f"Emparejando con\n{mac}...")
-            out1 = self._btctl(f"pair {mac}", timeout=15)
-            out2 = self._btctl(f"trust {mac}", timeout=5)
-            out3 = self._btctl(f"connect {mac}", timeout=12)
-            if "Connection successful" in out3 or "Connected: yes" in out3:
-                self._show_result(f"Emparejado + Conectado!\n{mac}")
-            else:
-                self._show_result(f"Emparejado\n(checkear conexion)")
-            self._load_paired()
-        elif action == "A":
-            self._screen = "result"
-            self._show_result(f"Emparejando + audio...")
-            self._btctl(f"pair {mac}", timeout=15)
-            self._btctl(f"trust {mac}", timeout=5)
-            out = self._btctl(f"connect {mac}", timeout=12)
-            time.sleep(2)
-            sinks = self._list_sinks()
-            found = False
-            for s in sinks:
-                if mac.replace(":", "_") in s["name"]:
-                    self._set_default_sink(s["name"])
-                    self._show_result(f"Conectado! Audio en:\n{s['name'][:20]}")
-                    found = True
-                    break
-            if not found:
-                self._show_result(f"Emparejado, pero no se\nencontro sink audio.\nRevisa conexion.")
-            self._load_paired()
+        if action == "UP":
+            self._scan_action_idx = max(0, self._scan_action_idx - 1)
+            self._draw_scan_dev()
+        elif action == "DOWN":
+            self._scan_action_idx = min(len(self._scan_actions) - 1, self._scan_action_idx + 1)
+            self._draw_scan_dev()
+        elif action == "ENTER":
+            if self._scan_action_idx >= len(self._scan_actions):
+                return
+            _, cmd = self._scan_actions[self._scan_action_idx]
+            if cmd == "_pair":
+                self._screen = "result"
+                self._show_result(f"Emparejando con\n{mac}...")
+                self._btctl(f"pair {mac}", timeout=15)
+                self._btctl(f"trust {mac}", timeout=5)
+                out = self._btctl(f"connect {mac}", timeout=12)
+                if "Connection successful" in out or "Connected: yes" in out:
+                    self._show_result(f"Emparejado + Conectado!\n{mac}")
+                else:
+                    self._show_result(f"Emparejado\n(checkear conexion)")
+                self._load_paired()
+            elif cmd == "_pair_audio":
+                self._screen = "result"
+                self._show_result(f"Emparejando + audio...")
+                self._btctl(f"pair {mac}", timeout=15)
+                self._btctl(f"trust {mac}", timeout=5)
+                out = self._btctl(f"connect {mac}", timeout=12)
+                time.sleep(2)
+                sinks = self._list_sinks()
+                found = False
+                for s in sinks:
+                    if mac.replace(":", "_") in s["name"]:
+                        self._set_default_sink(s["name"])
+                        self._show_result(f"Conectado! Audio en:\n{s['name'][:20]}")
+                        found = True
+                        break
+                if not found:
+                    self._show_result(f"Emparejado, pero no se\nencontro sink audio.\nRevisa conexion.")
+                self._load_paired()
+            elif cmd == "_back":
+                self._screen = "scan"
+                self._draw_result(["ENTER=Escanear de nuevo", "", "BACK=Volver"], "ESCANEO", (100, 200, 255))
         elif action == "BACK":
             self._screen = "scan"
             self._draw_result(["ENTER=Escanear de nuevo", "", "BACK=Volver"], "ESCANEO", (100, 200, 255))
@@ -483,21 +536,24 @@ class BluetoothManagerApp:
         lines = [
             "=== AYUDA BLUETOOTH ===",
             "",
-            "Xbox Controller:",
-            "1. Boton Xbox + Pairing",
-            "2. Escanea desde el menu",
-            "3. Selecciona 'Emparejar'",
+            "Para emparejar:",
+            "1. Escanea desde el menu",
+            "2. Selecciona dispositivo",
+            "3. Elige 'Emparejar'",
             "",
             "Audifonos BT:",
-            "1. Modo pairing",
-            "2. Escanea y selecciona",
-            "3. Usa 'A' para emparejar",
-            "   + cambiar audio",
+            "Elige 'Emparejar + Audio'",
+            "para conectar y cambiar",
+            "salida automaticamente.",
             "",
             "Salida de audio:",
             "Menu > Salida de audio",
-            "Selecciona dispositivo",
-            "Fiio DAC / Jack / BT",
+            "Navega con ^v y ENTER",
+            "para seleccionar salida.",
+            "",
+            "Navegacion:",
+            "^v = mover  ENTER=ok",
+            "BACK = volver atras",
             "",
             "BACK para volver",
         ]

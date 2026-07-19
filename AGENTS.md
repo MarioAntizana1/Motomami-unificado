@@ -44,7 +44,19 @@ sudo journalctl -u motomami -f               # Ver logs
 
 ## Workflow
 
-1. Leer `Objetivos.md` en `.agents/rules/` para conocer bugs/features pendientes
-2. Para cambios en GPIO/pinout, revisar `pinout-rpi.md`
-3. Verificar con test de pantalla dual antes de deploy
-4. Commit solo cuando se solicite explícitamente
+1. **Leer `memory.md`** en `.agents/rules/` para cargar contexto entre sesiones
+2. Leer `Objetivos.md` en `.agents/rules/` para conocer bugs/features pendientes
+3. Para cambios en GPIO/pinout, revisar `pinout-rpi.md`
+4. **Actualizar `memory.md`** al final de cada sesión con bugs corregidos, decisiones y aprendizajes
+5. Verificar con test de pantalla dual antes de deploy
+
+## Deploy automático
+
+Después de cada cambio en `src/` (o cualquier modificación que afecte al sistema en ejecución):
+
+1. **Commit + Push** a GitHub (`main`)
+2. **Actualizar RPi** — descargar archivos desde raw.githubusercontent.com
+3. **Actualizar Graphify** — `graphify update .` (sin costo de API)
+4. **Reiniciar servicio** — `ssh-rpi_sudo-exec "systemctl restart motomami"`
+
+

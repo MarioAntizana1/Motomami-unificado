@@ -71,36 +71,25 @@ class MapRenderer:
     def render_map_staticmap(self, lat: float, lon: float,
                              route_points: List[Tuple[float, float]] = None) -> Image.Image:
         """
-        Renderiza un mapa usando staticmap.
-
-        Args:
-            lat, lon: Coordenadas actuales
-            route_points: Lista de (lat, lon) para dibujar ruta
-
-        Returns:
-            PIL Image del mapa
+        Renderiza un mapa usando staticmap (sin control de zoom).
+        staticmap auto-calcula el zoom desde el extent de los features.
         """
         if not HAS_STATICMAP:
-            return self.render_map_tiles(lat, lon, route_points)
+            return self._create_fallback_map(lat, lon, "staticmap no instalado")
 
         try:
-            # Crear mapa
-            m = StaticMap(self.width, self.height, self.zoom)
+            m = StaticMap(self.width, self.height)
 
-            # Dibujar ruta si existe
             if route_points and len(route_points) > 1:
-                coords = [(lon, lat) for lat, lon in route_points]  # staticmap usa (lon, lat)
+                coords = [(lon, lat) for lat, lon in route_points]
                 line = SLine(coords, 'blue', 2)
                 m.add_line(line)
 
-            # Marcador de posición actual
             marker = CircleMarker((lon, lat), 'red', 8)
             m.add_marker(marker)
 
-            # Renderizar
             image = m.render()
 
-            # Añadir info
             draw = ImageDraw.Draw(image)
             info = f"⊙ {lat:.4f}, {lon:.4f}"
             draw.text((4, 4), info, font=self.font, fill=(255, 255, 255))
@@ -195,13 +184,17 @@ class MapRenderer:
 
     def render_map(self, lat: float, lon: float,
                    route_points: List[Tuple[float, float]] = None) -> Image.Image:
-        """Renderiza mapa (elige automáticamente el mejor método)"""
+        """Renderiza mapa: tiles (soporta zoom) → staticmap → fallback"""
         self.user_position = (lat, lon)
-        
-        if HAS_STATICMAP:
-            return self.render_map_staticmap(lat, lon, route_points)
-        else:
+
+        # Tiles directos (ruta principal, soporta zoom controlable)
+        try:
             return self.render_map_tiles(lat, lon, route_points)
+        except Exception as e:
+            print(f"[MAP] Error en tiles: {e}")
+            if HAS_STATICMAP:
+                return self.render_map_staticmap(lat, lon, route_points)
+            return self._create_fallback_map(lat, lon, f"Tile Error: {e}")
 
     def _create_fallback_map(self, lat: float, lon: float,
                              error_msg: str = "") -> Image.Image:

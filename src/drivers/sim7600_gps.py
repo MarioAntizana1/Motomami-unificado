@@ -285,20 +285,20 @@ class SIM7600GPS:
             try:
                 now = time.time()
 
-                # Cada segundo pedir CGPSINFO
+                # Cada segundo pedir CGPSINFO (actualiza posicion + alt + vel + rumbo)
                 if now - last_info_time >= 1.0:
                     self._request_gps_info()
                     last_info_time = now
 
-                # También leer NMEA del puerto (si hay datos)
+                # Leer NMEA del puerto (satelites + datos de respaldo)
                 self._read_nmea()
 
-                # Callback único ~1s con datos combinados (CGPSINFO + NMEA)
-                if self._callback and now - last_cb_time >= 1.0:
+                # Callback cada ~0.4s con datos combinados
+                if self._callback and now - last_cb_time >= 0.4:
                     self._callback(self.data)
                     last_cb_time = now
 
-                time.sleep(0.05)  # Pequeña pausa para no saturar CPU
+                time.sleep(0.05)
 
             except serial.SerialException:
                 print("[SIM7600-GPS] Puerto cerrado inesperadamente")
@@ -400,6 +400,10 @@ class SIM7600GPS:
                 lat_dd, lon_dd = self.data.get_coordinates_decimal()
                 print(f"[SIM7600-GPS] Posicion: {lat_dd:.6f}, {lon_dd:.6f} | "
                       f"Alt:{alt_val:.1f}m Vel:{speed_val:.1f}km/h", flush=True)
+
+                # Callback inmediato con datos frescos
+                if self._callback:
+                    self._callback(self.data)
 
             except (ValueError, IndexError) as e:
                 print(f"[SIM7600-GPS] Error parseando CGPSINFO: {e}")
