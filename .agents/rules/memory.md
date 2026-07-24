@@ -83,6 +83,67 @@ SIM7600 (_request_gps_info @1Hz + _read_nmea @5-10Hz)
 - El estado global es `SystemState` singleton con locks
 - Preferir `ssh-rpi_exec` para comandos en RPi (no SCP/SSH directo desde PowerShell)
 
+## Red WiFi AP (Motomami-net)
+
+- **Adaptador USB**: RTL8192EU (Realtek), driver `rtl8xxxu`
+- **IP AP**: `192.168.42.1/24` en `wlan1`
+- **SSID**: `Motomami-net`, WPA2, ch 6 (2.4GHz)
+- **DHCP**: dnsmasq rango `192.168.42.2-192.168.42.50`
+- **Internet**: NAT via iptables, salida por `wlan0` (Mario-wifi)
+- **Mosquitto MQTT**: `192.168.42.1:1883` (accesible por ESP32 y celu desde el AP)
+- **Futuro internet**: SIM7600 (datos celulares), reemplazará `wlan0` como salida NAT
+
+### Servicios configurados
+
+| Servicio | Rol | Enable |
+|---|---|---|
+| `hostapd` | AP WiFi (SSID Motomami-net) | ✅ |
+| `dnsmasq` | DHCP + DNS para AP | ✅ |
+| `netfilter-persistent` | Persistir reglas iptables | ✅ |
+| `wlan1-ip.service` | Asignar IP estática a wlan1 | ✅ |
+| `mosquitto` | MQTT broker local | ✅ |
+
+### Archivos de config
+
+- `/etc/hostapd/hostapd.conf` — configuración AP
+- `/etc/dnsmasq.d/motomami.conf` — DHCP rango AP
+- `/etc/systemd/system/wlan1-ip.service` — IP estática wlan1
+- `/etc/NetworkManager/conf.d/10-unmanaged-wlan1.conf` — NM ignora wlan1
+- `/etc/sysctl.d/99-ipforward.conf` — IP forwarding
+
+## MQTT Monitor App
+
+- **Servicio**: `MqttListenerService` (en `src/services/mqtt_listener.py`) — se suscribe a `motomami/#` en Mosquitto local, actualiza `Esp32VelocimetroState` y `Esp32DireccionalesState` en `SystemState`
+- **App**: `MqttMonitorApp` (en `src/apps/mqtt_monitor_app.py`) — canvas 640x240 (fb2 izq + fb1 der)
+  - **Izquierda (fb2)**: Velocímetro — velocidad grande, barra gráfica, distancia, odómetro, pulsos
+  - **Derecha (fb1)**: Direccionales — flechas izq/der, emergencia, frenado, luz nocturna + intensidad, intensidad general
+- **Refresco**: 300ms (para seguir las publicaciones del ESP32 cada 300ms)
+- **Menu key**: `"mqtt"` en `main_menu.py`, launcher en `main.py`
+- **Config**: `MQTT_LOCAL_HOST = 192.168.42.1`, `MQTT_LOCAL_PORT = 1883` (configurable en `config_loader.py`)
+
+### Topics monitoreados
+
+| Topic | De | Payload |
+|-------|----|---------|
+| `motomami/velocimetro/data` | ESP32 velo | `{"s":speed,"d":dist,"p":pulses}` cada 300ms |
+| `motomami/velocimetro/odometro` | ESP32 velo | `"1.234"` (float string, al conectar) |
+| `motomami/velocimetro/status` | ESP32 velo | `"online"/"offline"` (last will) |
+| `motomami/status` | ESP32 dir | `"online"/"offline"` (last will) |
+| `motomami/status/ip` | ESP32 dir | IP string (al conectar) |
+| `motomami/status/rssi` | ESP32 dir | RSSI string (cada ~20s) |
+
+### Topics de control (recibidos por ESP32, monitoreados para estado)
+
+| Topic | Comando |
+|-------|---------|
+| `motomami/intermitente_izquierda` | ON/OFF |
+| `motomami/intermitente_derecha` | ON/OFF |
+| `motomami/intermitente_emergencia` | ON/OFF |
+| `motomami/frenado` | ON/OFF |
+| `motomami/luz_nocturna` | ON/OFF |
+| `motomami/luz_nocturna/intensidad` | 0-100 |
+| `motomami/intensidad` | 0-100 |
+
 ## Graphify (Knowledge Graph)
 
 - **Instalado**: CLI `graphify v0.9.17` + plugin `.opencode/plugins/graphify.js`

@@ -48,6 +48,10 @@ FB2_PATH = _cfg.get("display", "fb2",    fallback="/dev/fb2")
 DISP_W   = _cfg.getint("display", "width",  fallback=320)
 DISP_H   = _cfg.getint("display", "height", fallback=240)
 
+# ── MQTT Local (Mosquitto AP) ──
+MQTT_LOCAL_HOST = _cfg.get("mqtt_local", "host", fallback="192.168.42.1")
+MQTT_LOCAL_PORT = _cfg.getint("mqtt_local", "port", fallback=1883)
+
 # ── Sistema ──
 TELEMETRY_INTERVAL = _cfg.getint("system", "telemetry_interval",   fallback=5)
 GPS_REFRESH        = _cfg.getfloat("system", "gps_refresh_interval", fallback=1.0)

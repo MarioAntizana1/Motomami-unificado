@@ -21,6 +21,7 @@ from core.input_manager import InputManager
 from core.gps_service import GPSService
 from core.telemetria_service import TelemetriaService
 from core.music_service import MusicService
+from services.mqtt_listener import MqttListenerService
 from apps.main_menu import MainMenu
 from apps.gps_display_app import GPSDisplayApp
 from apps.video_player_app import VideoPlayerApp
@@ -38,6 +39,7 @@ class MotoMamiSystem:
         self.gps_svc = GPSService(self.state)
         self.telemetria_svc = TelemetriaService(self.state)
         self.music_svc = MusicService(self.state)
+        self.mqtt_listener = MqttListenerService(self.state)
         
         self.running = False
         
@@ -62,6 +64,9 @@ class MotoMamiSystem:
         
         print("[Main] Iniciando Music Service...")
         self.music_svc.init()
+
+        print("[Main] Iniciando MQTT Listener...")
+        self.mqtt_listener.start()
         
         # El SystemState (recursos del sistema) ya inicia automáticamente su hilo interno
         self.running = True
@@ -72,6 +77,7 @@ class MotoMamiSystem:
         self.music_svc.quit()
         self.telemetria_svc.stop()
         self.gps_svc.stop()
+        self.mqtt_listener.stop()
         self.input_mgr.stop()
         print("[Main] Sistema detenido de forma segura.")
 
@@ -123,6 +129,11 @@ class MotoMamiSystem:
                 elif app_key == "bt_mgr":
                     print("[Main] Lanzando Bluetooth Manager")
                     app = BluetoothManagerApp(self.input_mgr, self.state)
+                    app.run()
+                elif app_key == "mqtt":
+                    print("[Main] Lanzando Monitor MQTT")
+                    from apps.mqtt_monitor_app import MqttMonitorApp
+                    app = MqttMonitorApp(self.input_mgr, self.state)
                     app.run()
                 elif app_key == "telem":
                     # Si tuvieras una app para visualizar la telemetría, se lanzaría aquí.

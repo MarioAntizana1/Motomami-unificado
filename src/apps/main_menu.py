@@ -22,6 +22,7 @@ APPS = [
     {"name": "Conexiones",     "key": "conex",   "color": ( 80, 180, 255), "icon": "N", "desc": "USB, WiFi, Bluetooth"},
     {"name": "Bluetooth",      "key": "bt_mgr",  "color": (180,  80, 255), "icon": "B", "desc": "Gestionar dispositivos BT"},
     {"name": "Telemetria",     "key": "telem",   "color": ( 50, 200, 255), "icon": "S", "desc": "Datos de telemetria"},
+    {"name": "Monitor MQTT",   "key": "mqtt",    "color": (  0, 200, 255), "icon": "Q", "desc": "ESP32 velocidad + luces"},
     {"name": "SALIR",          "key": "exit",    "color": (150, 150, 150), "icon": "X", "desc": "Reiniciar el sistema"},
 ]
 

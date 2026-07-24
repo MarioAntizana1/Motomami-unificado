@@ -90,6 +90,33 @@ class MusicState:
     volume: int = 70
 
 
+@dataclass
+class Esp32VelocimetroState:
+    """Datos del ESP32 velocímetro vía MQTT."""
+    speed: float = 0.0        # km/h
+    distance: float = 0.0     # km total
+    odometro: float = 0.0     # km odómetro
+    pulses: int = 0
+    online: bool = False
+    last_update: float = 0.0
+
+
+@dataclass
+class Esp32DireccionalesState:
+    """Datos del ESP32 direccionales vía MQTT."""
+    online: bool = False
+    ip: str = ""
+    rssi: str = ""
+    intermitente_izq: bool = False
+    intermitente_der: bool = False
+    emergencia: bool = False
+    frenado: bool = False
+    luz_nocturna: bool = False
+    intensidad: int = 0
+    intensidad_nocturna: int = 0
+    last_update: float = 0.0
+
+
 class SystemState:
     """
     Estado global del sistema. Thread-safe.
@@ -102,10 +129,13 @@ class SystemState:
         self._gps_lock = threading.Lock()
         self._metrics_lock = threading.Lock()
         self._music_lock = threading.Lock()
+        self._esp32_lock = threading.Lock()
 
         self.gps = GPSState()
         self.metrics = SystemMetrics()
         self.music = MusicState()
+        self.esp32_velocimetro = Esp32VelocimetroState()
+        self.esp32_direccionales = Esp32DireccionalesState()
 
         # Señales de control
         self.shutdown_event = threading.Event()
@@ -150,6 +180,30 @@ class SystemState:
         with self._music_lock:
             import copy
             return copy.copy(self.music)
+
+    def update_esp32_velocimetro(self, **kwargs):
+        with self._esp32_lock:
+            for k, v in kwargs.items():
+                if hasattr(self.esp32_velocimetro, k):
+                    setattr(self.esp32_velocimetro, k, v)
+            self.esp32_velocimetro.last_update = time.time()
+
+    def get_esp32_velocimetro(self) -> Esp32VelocimetroState:
+        with self._esp32_lock:
+            import copy
+            return copy.copy(self.esp32_velocimetro)
+
+    def update_esp32_direccionales(self, **kwargs):
+        with self._esp32_lock:
+            for k, v in kwargs.items():
+                if hasattr(self.esp32_direccionales, k):
+                    setattr(self.esp32_direccionales, k, v)
+            self.esp32_direccionales.last_update = time.time()
+
+    def get_esp32_direccionales(self) -> Esp32DireccionalesState:
+        with self._esp32_lock:
+            import copy
+            return copy.copy(self.esp32_direccionales)
 
     def request_shutdown(self):
         self.shutdown_event.set()
