@@ -93,7 +93,7 @@ class MqttListenerService(threading.Thread):
         if self._state is None:
             return
         topic = msg.topic
-        payload = msg.payload.decode(errors="replace").strip()
+        payload = self._strip_msg_id(msg.payload.decode(errors="replace").strip())
 
         # ── Velocímetro ──
         if topic == "motomami/velocimetro/data":
@@ -124,6 +124,16 @@ class MqttListenerService(threading.Thread):
             self._state.update_esp32_direccionales(intermitente_der=(payload == "ON"))
         elif topic == "motomami/intermitente_emergencia":
             self._state.update_esp32_direccionales(emergencia=(payload == "ON"))
+
+    @staticmethod
+    def _strip_msg_id(payload: str) -> str:
+        """El módulo input publica '<id>:ON' / '<id>:OFF' (id = contador de
+        mensajes para detectar pérdidas). Acepta también el formato plano
+        'ON'/'OFF' de antes."""
+        head, sep, tail = payload.partition(":")
+        if sep and head.isdigit() and tail:
+            return tail
+        return payload
 
     def _handle_velo_data(self, payload: str):
         try:

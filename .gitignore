@@ -23,3 +23,9 @@ graphify-out/
 
 # Sincronizacion local
 Users/
+
+# ESP32 build artifacts
+build/
+.pio/
+sdkconfig.old
+managed_components/
