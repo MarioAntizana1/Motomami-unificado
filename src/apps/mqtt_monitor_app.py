@@ -70,13 +70,16 @@ class MqttMonitorApp:
     def _render(self):
         velo = self._state.get_esp32_velocimetro() if self._state else None
         dire = self._state.get_esp32_direccionales() if self._state else None
+        inp  = self._state.get_esp32_input() if self._state else None
 
-        img_left  = self._render_velocimetro(velo)
-        img_right = self._render_direccionales(dire)
+        img_left   = self._render_velocimetro(velo)
+        img_dire   = self._render_direccionales(dire, 160)
+        img_input  = self._render_input(inp, 80)
 
         full = self._fb.image()
-        full.paste(img_left,  (0,   0))
-        full.paste(img_right, (320, 0))
+        full.paste(img_left,   (0,   0))
+        full.paste(img_dire,   (320, 0))
+        full.paste(img_input,  (320, 160))
         self._fb.update()
 
     # ── Panel izquierdo: Velocímetro ──
@@ -145,10 +148,10 @@ class MqttMonitorApp:
 
         return img
 
-    # ── Panel derecho: Direccionales / Luces ──
+    # ── Panel derecho: Direccionales (compactado) ──
 
-    def _render_direccionales(self, dire) -> Image.Image:
-        W, H = 320, 240
+    def _render_direccionales(self, dire, H=160) -> Image.Image:
+        W = 320
         img = Image.new("RGB", (W, H), C_BG)
         d = ImageDraw.Draw(img)
 
@@ -157,22 +160,27 @@ class MqttMonitorApp:
         has_data = dire is not None and dire.last_update > 0
 
         # Barra superior
-        d.rectangle([(0, 0), (W - 1, 20)], fill=(40, 20, 20))
-        d.text((6, 2), "DIRECCIONALES", font=self._f_small, fill=C_WHITE)
+        d.rectangle([(0, 0), (W - 1, 18)], fill=(40, 20, 20))
+        d.text((6, 1), "DIRECCIONALES", font=self._f_small, fill=C_WHITE)
 
         dot_color = C_GREEN if (online and not stale) else (C_YELLOW if stale and has_data else C_RED)
-        d.ellipse([(W - 18, 4), (W - 6, 16)], fill=dot_color)
+        d.ellipse([(W - 16, 3), (W - 6, 13)], fill=dot_color)
         status_txt = "ONLINE" if (online and not stale) else ("STALE" if stale and has_data else "OFF")
-        d.text((W - 85, 2), status_txt, font=self._f_small, fill=dot_color)
+        d.text((W - 78, 1), status_txt, font=self._f_small, fill=dot_color)
 
-        # IP y RSSI
+        # IP / RSSI / ID en una línea
         ip = dire.ip if dire is not None else ""
         rssi = dire.rssi if dire is not None else ""
+        did = dire.id if dire is not None else ""
         if has_data:
-            d.text((6, 24), f"IP: {ip}" if ip else "IP: --", font=self._f_small, fill=C_BLUE)
-            d.text((6, 38), f"RSSI: {rssi} dBm" if rssi else "RSSI: --", font=self._f_small, fill=C_BLUE)
+            parts = []
+            if ip: parts.append(f"IP:{ip}")
+            if rssi: parts.append(f"RSSI:{rssi}dBm")
+            if did: parts.append(f"ID:{did}")
+            line = "  ".join(parts) if parts else "Esperando datos..."
+            d.text((6, 20), line, font=self._f_small, fill=C_BLUE)
         else:
-            d.text((6, 24), "Esperando datos...", font=self._f_small, fill=C_DIM)
+            d.text((6, 20), "Esperando datos...", font=self._f_small, fill=C_DIM)
 
         # ── Estado de las luces ──
         izq  = dire.intermitente_izq if dire is not None else False
@@ -183,87 +191,106 @@ class MqttMonitorApp:
         inten   = dire.intensidad if dire is not None else 0
         inten_n = dire.intensidad_nocturna if dire is not None else 0
 
-        # Ayudantes
         def status_color(on):
             return C_ON if on else C_OFF
 
         def status_onoff(on):
             return "ON" if on else "OFF"
 
-        y = 58
+        y = 38
 
-        # Flecha izquierda
+        # Fila 1: Izquierda
         c_izq = C_YELLOW if izq else C_OFF
-        d.polygon([(20, y + 6), (48, y), (48, y + 12)], fill=c_izq)
-        d.text((54, y + 2), "IZQUIERDA", font=self._f_small, fill=c_izq)
-        d.text((W - 45, y + 2), status_onoff(izq), font=self._f_small, fill=status_color(izq))
+        d.polygon([(14, y + 5), (36, y), (36, y + 10)], fill=c_izq)
+        d.text((40, y), "IZQUIERDA", font=self._f_small, fill=c_izq)
+        d.text((W - 40, y), status_onoff(izq), font=self._f_small, fill=status_color(izq))
 
-        y += 20
-        # Flecha derecha
+        y += 14
+        # Fila 2: Derecha
         c_der = C_YELLOW if der else C_OFF
-        d.polygon([(W - 20, y + 6), (W - 48, y), (W - 48, y + 12)], fill=c_der)
-        d.text((20, y + 2), "DERECHA", font=self._f_small, fill=c_der)
-        d.text((W - 45, y + 2), status_onoff(der), font=self._f_small, fill=status_color(der))
+        d.polygon([(W - 14, y + 5), (W - 36, y), (W - 36, y + 10)], fill=c_der)
+        d.text((14, y), "DERECHA", font=self._f_small, fill=c_der)
+        d.text((W - 40, y), status_onoff(der), font=self._f_small, fill=status_color(der))
 
-        y += 20
-        # Emergencia (triángulo de advertencia)
+        y += 14
+        # Fila 3: Emergencia
         c_emer = C_RED if emer else C_OFF
-        d.polygon([(30, y + 12), (20, y + 2), (40, y + 2)], fill=c_emer)
-        d.text((46, y + 2), "EMERGENCIA", font=self._f_small, fill=c_emer)
-        d.text((W - 45, y + 2), status_onoff(emer), font=self._f_small, fill=status_color(emer))
+        d.polygon([(24, y + 10), (15, y + 1), (33, y + 1)], fill=c_emer)
+        d.text((38, y), "EMERGENCIA", font=self._f_small, fill=c_emer)
+        d.text((W - 40, y), status_onoff(emer), font=self._f_small, fill=status_color(emer))
 
-        y += 20
-        # Frenado
+        y += 14
+        # Fila 4: Frenado
         c_fren = C_RED if fren else C_OFF
-        d.rectangle([(22, y + 2), (42, y + 12)], fill=c_fren)
-        d.text((48, y + 2), "FRENADO", font=self._f_small, fill=c_fren)
-        d.text((W - 45, y + 2), status_onoff(fren), font=self._f_small, fill=status_color(fren))
+        d.rectangle([(16, y + 1), (34, y + 9)], fill=c_fren)
+        d.text((38, y), "FRENADO", font=self._f_small, fill=c_fren)
+        d.text((W - 40, y), status_onoff(fren), font=self._f_small, fill=status_color(fren))
 
-        y += 20
-
-        # ── Separador ──
+        y += 14
+        # Separador + nocturna
         d.line([(10, y), (W - 10, y)], fill=(30, 30, 40))
-        y += 4
+        y += 2
 
-        # Luz nocturna
         c_noc = C_BLUE if luz else C_OFF
-        d.text((16, y), "LUZ NOCTURNA", font=self._f_small, fill=c_noc)
-        d.text((W - 45, y), status_onoff(luz), font=self._f_small, fill=status_color(luz))
-        y += 14
-
-        # Barra intensidad nocturna
+        d.text((14, y), f"NOCTURNA:{status_onoff(luz)}", font=self._f_small, fill=c_noc)
         if has_data:
-            bar_x, bar_y = 20, y
-            bar_w = W - 110
+            d.text((140, y), f"INT:{inten}%  NOC:{inten_n}%", font=self._f_small, fill=C_YELLOW)
+
+        y += 12
+        # Barras de intensidad
+        if has_data:
+            bar_w = W - 30
             pct_n = min(inten_n, 100) / 100.0
-            d.rectangle([(bar_x, bar_y), (bar_x + bar_w, bar_y + 6)], fill=(30, 30, 40))
-            d.rectangle([(bar_x, bar_y), (bar_x + int(bar_w * pct_n), bar_y + 6)], fill=C_BLUE)
-            d.text((bar_x + bar_w + 6, bar_y - 2), f"{inten_n}%", font=self._f_small, fill=C_BLUE)
-        y += 10
-
-        # Intensidad general
-        d.text((16, y), "INTENSIDAD", font=self._f_small, fill=C_DIM)
-        if has_data:
-            d.text((W - 45, y), f"{inten}%", font=self._f_small, fill=C_YELLOW)
-        y += 14
-
-        # Barra intensidad general
-        if has_data:
-            bar_x, bar_y = 20, y
-            bar_w = W - 110
+            d.rectangle([(15, y), (15 + int(bar_w * pct_n), y + 3)], fill=C_BLUE)
             pct = min(inten, 100) / 100.0
-            d.rectangle([(bar_x, bar_y), (bar_x + bar_w, bar_y + 6)], fill=(30, 30, 40))
-            d.rectangle([(bar_x, bar_y), (bar_x + int(bar_w * pct), bar_y + 6)], fill=C_YELLOW)
-            d.text((bar_x + bar_w + 6, bar_y - 2), f"{inten}%", font=self._f_small, fill=C_YELLOW)
+            d.rectangle([(15, y + 4), (15 + int(bar_w * pct), y + 7)], fill=C_YELLOW)
 
-        # Última actualización
+        # Timestamp
         if has_data:
             from datetime import datetime, timezone, timedelta
             utc = datetime.fromtimestamp(dire.last_update, tz=timezone.utc)
             lt = utc.astimezone(timezone(timedelta(hours=-5)))
-            d.text((W - 100, H - 14), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C_DIM)
+            d.text((W - 80, H - 12), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C_DIM)
+
+        return img
+
+    # ── Panel inferior derecho: Input ──
+
+    def _render_input(self, inp, H=80) -> Image.Image:
+        W = 320
+        img = Image.new("RGB", (W, H), C_BG)
+        d = ImageDraw.Draw(img)
+
+        online = inp is not None and inp.online
+        stale = inp is not None and (time.time() - inp.last_update) > 30.0
+        has_data = inp is not None and inp.last_update > 0
+
+        d.rectangle([(0, 0), (W - 1, 18)], fill=(20, 40, 20))
+        d.text((6, 1), "INPUT", font=self._f_small, fill=C_WHITE)
+
+        dot_color = C_GREEN if (online and not stale) else (C_YELLOW if stale and has_data else C_RED)
+        d.ellipse([(W - 16, 3), (W - 6, 13)], fill=dot_color)
+        status_txt = "ONLINE" if (online and not stale) else ("STALE" if stale and has_data else "OFF")
+        d.text((W - 78, 1), status_txt, font=self._f_small, fill=dot_color)
+
+        ip = inp.ip if inp is not None else ""
+        rssi = inp.rssi if inp is not None else ""
+        iid = inp.id if inp is not None else ""
+        if has_data:
+            parts = []
+            if ip: parts.append(f"IP:{ip}")
+            if rssi: parts.append(f"RSSI:{rssi}dBm")
+            if iid: parts.append(f"ID:{iid}")
+            line = "  ".join(parts) if parts else "Conectado"
+            d.text((6, 22), line, font=self._f_small, fill=C_BLUE)
         else:
-            d.text((W - 100, H - 14), "---", font=self._f_small, fill=C_DIM)
+            d.text((6, 22), "Esperando datos...", font=self._f_small, fill=C_DIM)
+
+        if has_data:
+            from datetime import datetime, timezone, timedelta
+            utc = datetime.fromtimestamp(inp.last_update, tz=timezone.utc)
+            lt = utc.astimezone(timezone(timedelta(hours=-5)))
+            d.text((W - 80, H - 12), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C_DIM)
 
         return img
 

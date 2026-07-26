@@ -98,6 +98,19 @@ class Esp32VelocimetroState:
     odometro: float = 0.0     # km odómetro
     pulses: int = 0
     online: bool = False
+    ip: str = ""
+    rssi: str = ""
+    id: str = ""
+    last_update: float = 0.0
+
+
+@dataclass
+class Esp32InputState:
+    """Datos del ESP32 input vía MQTT."""
+    online: bool = False
+    ip: str = ""
+    rssi: str = ""
+    id: str = ""
     last_update: float = 0.0
 
 
@@ -107,6 +120,7 @@ class Esp32DireccionalesState:
     online: bool = False
     ip: str = ""
     rssi: str = ""
+    id: str = ""
     intermitente_izq: bool = False
     intermitente_der: bool = False
     emergencia: bool = False
@@ -136,6 +150,7 @@ class SystemState:
         self.music = MusicState()
         self.esp32_velocimetro = Esp32VelocimetroState()
         self.esp32_direccionales = Esp32DireccionalesState()
+        self.esp32_input = Esp32InputState()
 
         # Señales de control
         self.shutdown_event = threading.Event()
@@ -192,6 +207,18 @@ class SystemState:
         with self._esp32_lock:
             import copy
             return copy.copy(self.esp32_velocimetro)
+
+    def update_esp32_input(self, **kwargs):
+        with self._esp32_lock:
+            for k, v in kwargs.items():
+                if hasattr(self.esp32_input, k):
+                    setattr(self.esp32_input, k, v)
+            self.esp32_input.last_update = time.time()
+
+    def get_esp32_input(self) -> Esp32InputState:
+        with self._esp32_lock:
+            import copy
+            return copy.copy(self.esp32_input)
 
     def update_esp32_direccionales(self, **kwargs):
         with self._esp32_lock:

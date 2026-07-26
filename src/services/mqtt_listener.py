@@ -102,6 +102,12 @@ class MqttListenerService(threading.Thread):
             self._handle_velo_odometro(payload)
         elif topic == "motomami/velocimetro/status":
             self._state.update_esp32_velocimetro(online=(payload.lower() == "online"))
+        elif topic == "motomami/velocimetro/ip":
+            self._state.update_esp32_velocimetro(ip=payload)
+        elif topic == "motomami/velocimetro/rssi":
+            self._state.update_esp32_velocimetro(rssi=payload)
+        elif topic == "motomami/velocimetro/id":
+            self._state.update_esp32_velocimetro(id=payload)
 
         # ── Direccionales ──
         elif topic == "motomami/status":
@@ -110,6 +116,8 @@ class MqttListenerService(threading.Thread):
             self._state.update_esp32_direccionales(ip=payload)
         elif topic == "motomami/status/rssi":
             self._state.update_esp32_direccionales(rssi=payload)
+        elif topic == "motomami/status/id":
+            self._state.update_esp32_direccionales(id=payload)
         elif topic == "motomami/frenado":
             self._state.update_esp32_direccionales(frenado=(payload == "ON"))
         elif topic == "motomami/luz_nocturna":
@@ -125,6 +133,16 @@ class MqttListenerService(threading.Thread):
         elif topic == "motomami/intermitente_emergencia":
             self._state.update_esp32_direccionales(emergencia=(payload == "ON"))
 
+        # ── Input ──
+        elif topic == "motomami-input/status":
+            self._state.update_esp32_input(online=(payload.lower() == "online"))
+        elif topic == "motomami-input/status/ip":
+            self._state.update_esp32_input(ip=payload)
+        elif topic == "motomami-input/status/rssi":
+            self._state.update_esp32_input(rssi=payload)
+        elif topic == "motomami-input/status/id":
+            self._state.update_esp32_input(id=payload)
+
     @staticmethod
     def _strip_msg_id(payload: str) -> str:
         """El módulo input publica '<id>:ON' / '<id>:OFF' (id = contador de
@@ -138,12 +156,16 @@ class MqttListenerService(threading.Thread):
     def _handle_velo_data(self, payload: str):
         try:
             data = json.loads(payload)
-            self._state.update_esp32_velocimetro(
+            kwargs = dict(
                 speed=float(data.get("s", 0)),
                 distance=float(data.get("d", 0)),
                 pulses=int(data.get("p", 0)),
                 online=True,
             )
+            raw_id = data.get("id")
+            if raw_id is not None:
+                kwargs["id"] = str(raw_id)
+            self._state.update_esp32_velocimetro(**kwargs)
         except (json.JSONDecodeError, ValueError):
             pass
 
