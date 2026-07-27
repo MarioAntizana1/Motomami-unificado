@@ -75,8 +75,9 @@ class InputManager(threading.Thread):
                 self._xbox = xbox
                 print("[Input] Mando Xbox conectado")
             else:
-                print("[Input] Mando Xbox no detectado")
+                self._xbox = None
         except Exception as e:
+            self._xbox = None
             print(f"[Input] Error Xbox: {e}")
 
     def _push(self, action: str, source: str = "gpio"):
@@ -98,10 +99,13 @@ class InputManager(threading.Thread):
         except queue.Empty:
             return None
 
+    XBOX_RETRY_INTERVAL = 3.0  # segundos entre reintentos de conexión
+
     def run(self):
         self._init_gpio()
         self._init_xbox()
         print(f"[Input] GPIO={'OK' if self._btns else 'N/A'} Xbox={'OK' if self._xbox else 'N/A'}")
+        last_xbox_retry = time.time()
 
         while not self._stop_event.is_set():
             # ── Leer GPIO ──
@@ -114,8 +118,22 @@ class InputManager(threading.Thread):
                     self._push(name, "gpio")
                 self._btn_prev[name] = cur
 
-            # ── Leer Xbox ──
-            if self._xbox:
+            # ── Xbox: hot-plug / reconexión ──
+            if self._xbox is None or not self._xbox.connected:
+                if self._xbox is not None:
+                    # Se desconectó: limpiar y reintentar
+                    try:
+                        self._xbox.stop()
+                    except Exception:
+                        pass
+                    self._xbox = None
+                    print("[Input] Xbox desconectado, reintentando...")
+                now = time.time()
+                if now - last_xbox_retry >= self.XBOX_RETRY_INTERVAL:
+                    last_xbox_retry = now
+                    self._init_xbox()
+            else:
+                # ── Leer Xbox ──
                 try:
                     evt = self._xbox.get_event(0.005)
                     while evt:

@@ -94,7 +94,8 @@ class DoomApp:
         self._fb.update()
 
     def _find_doom_binary(self):
-        candidates = ["chocolate-doom", "chocolate-doom3", "doom"]
+        # crispy-doom preferido: soporta mouselook (mirar arriba/abajo)
+        candidates = ["crispy-doom", "chocolate-doom", "chocolate-doom3", "doom"]
         for c in candidates:
             try:
                 r = subprocess.run(["which", c], capture_output=True, text=True, timeout=2)
@@ -102,7 +103,9 @@ class DoomApp:
                     return r.stdout.strip()
             except:
                 pass
-        for p in ["/usr/games/chocolate-doom", "/usr/bin/chocolate-doom",
+        for p in ["/usr/games/crispy-doom", "/usr/bin/crispy-doom",
+                   "/usr/local/bin/crispy-doom",
+                   "/usr/games/chocolate-doom", "/usr/bin/chocolate-doom",
                    "/usr/local/bin/chocolate-doom", "/usr/games/doom"]:
             if os.path.exists(p):
                 return p
@@ -142,7 +145,7 @@ class DoomApp:
                 )
             except FileNotFoundError:
                 self._render_error(f"No se encontro:\n{doom_bin}\n\n"
-                                   "Instala chocolate-doom:\nsudo apt install chocolate-doom")
+                                   "Instala crispy-doom:\nsudo apt install crispy-doom")
                 self.stop_game()
                 return
 

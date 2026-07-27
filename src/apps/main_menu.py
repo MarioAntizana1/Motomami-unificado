@@ -9,6 +9,7 @@ for _p in [_SRC, os.path.join(_SRC, 'libs'), os.path.join(_SRC, 'core')]:
 
 from PIL import Image, ImageDraw, ImageFont
 from libs.fb_display import FbDisplay, _find_font
+from libs.theme import get_theme, get_mode, toggle_mode, accent
 
 VISIBLE = 6
 
@@ -23,6 +24,7 @@ APPS = [
     {"name": "Bluetooth",      "key": "bt_mgr",  "color": (180,  80, 255), "icon": "B", "desc": "Gestionar dispositivos BT"},
     {"name": "Telemetria",     "key": "telem",   "color": ( 50, 200, 255), "icon": "S", "desc": "Datos de telemetria"},
     {"name": "Monitor MQTT",   "key": "mqtt",    "color": (  0, 200, 255), "icon": "Q", "desc": "ESP32 velocidad + luces"},
+    {"name": "Tema",           "key": "theme",   "color": (255, 220, 100), "icon": "*", "desc": "Cambiar dia/noche"},
     {"name": "SALIR",          "key": "exit",    "color": (150, 150, 150), "icon": "X", "desc": "Reiniciar el sistema"},
 ]
 
@@ -57,7 +59,12 @@ class MainMenu:
                     self._clamp_scroll()
                     self._draw()
                 elif action == "ENTER":
-                    return APPS[self._idx]["key"]
+                    key = APPS[self._idx]["key"]
+                    if key == "theme":
+                        toggle_mode()
+                        self._draw()
+                        continue
+                    return key
                 elif action == "BACK":
                     self._idx = len(APPS) - 1
                     return APPS[self._idx]["key"]
@@ -70,6 +77,14 @@ class MainMenu:
             self._scroll = self._idx - VISIBLE + 1
         self._scroll = max(0, min(self._scroll, total - VISIBLE))
 
+    def _app_display(self, app):
+        """Retorna (nombre, desc) dinámicos según el estado actual."""
+        if app["key"] == "theme":
+            mode = get_mode()
+            label = "Dia" if mode == "day" else "Noche"
+            return f"Tema: {label}", "ENTER cambia dia/noche"
+        return app["name"], app["desc"]
+
     def _draw(self):
         self._fb.blank()
         d = self._fb.draw()
@@ -78,12 +93,13 @@ class MainMenu:
         self._fb.update()
 
     def _draw_list(self, d):
+        t = get_theme("main_menu")
         W, H = 320, 240
         ox = 320
 
-        d.rectangle([(ox, 0), (ox + W - 1, 26)], fill=(20, 20, 80))
-        d.text((ox + 8, 4), "MOTO MAMI", font=self._ft, fill=(255, 255, 255))
-        d.line([(ox, 27), (ox + W - 1, 27)], fill=(60, 60, 120))
+        d.rectangle([(ox, 0), (ox + W - 1, 26)], fill=t.BG_MID)
+        d.text((ox + 8, 4), "MOTO MAMI", font=self._ft, fill=t.TEXT)
+        d.line([(ox, 27), (ox + W - 1, 27)], fill=t.BG_LIGHT)
 
         total = len(APPS)
         end = min(self._scroll + VISIBLE, total)
@@ -95,49 +111,54 @@ class MainMenu:
             app = APPS[i]
             sel = i == self._idx
             y = start_y + (i - self._scroll) * row_h
+            name, _ = self._app_display(app)
+            ac = accent(app["color"])
 
             if sel:
-                d.rectangle([(ox + 2, y - 1), (ox + W - 3, y + row_h - 2)], fill=(30, 30, 70), outline=app["color"])
+                d.rectangle([(ox + 2, y - 1), (ox + W - 3, y + row_h - 2)], fill=t.BG_LIGHT, outline=ac)
 
             cx, cy = ox + 18, y + 12
-            d.ellipse([(cx - 10, cy - 10), (cx + 10, cy + 10)], fill=app["color"] if sel else (40, 40, 50))
-            d.text((cx - 7, cy - 8), app["icon"], font=self._fi, fill=(0, 0, 0) if sel else app["color"])
+            d.ellipse([(cx - 10, cy - 10), (cx + 10, cy + 10)], fill=app["color"] if sel else t.BG_LIGHT)
+            d.text((cx - 7, cy - 8), app["icon"], font=self._fi, fill=t.ON_ACCENT if sel else ac)
 
-            name_color = app["color"] if sel else (160, 170, 190)
-            d.text((ox + 34, y + 5), app["name"], font=self._fi, fill=name_color)
+            name_color = ac if sel else t.TEXT_DIM
+            d.text((ox + 34, y + 5), name, font=self._fi, fill=name_color)
 
         if total > VISIBLE:
             bar_h = max(10, int(VISIBLE / total * (H - 50)))
             bar_y = 30 + (self._scroll / (total - VISIBLE)) * (H - 50 - bar_h)
-            d.rectangle([(ox + W - 4, int(bar_y)), (ox + W - 2, int(bar_y + bar_h))], fill=(100, 120, 160))
+            d.rectangle([(ox + W - 4, int(bar_y)), (ox + W - 2, int(bar_y + bar_h))], fill=t.TEXT_DIM)
 
-        d.line([(ox, H - 14), (ox + W - 1, H - 14)], fill=(40, 40, 60))
-        d.text((ox + 4, H - 12), "^v=Navegar  ENTER=Abrir  B=Salir", font=self._fs, fill=(70, 70, 90))
+        d.line([(ox, H - 14), (ox + W - 1, H - 14)], fill=t.BG_LIGHT)
+        d.text((ox + 4, H - 12), "^v=Navegar  ENTER=Abrir  B=Salir", font=self._fs, fill=t.TEXT_MUTED)
 
     def _draw_detail(self, d):
+        t = get_theme("main_menu")
         W, H = 320, 240
         app = APPS[self._idx]
+        name, desc = self._app_display(app)
+        ac = accent(app["color"])
 
-        d.rectangle([(0, 0), (W - 1, H - 1)], fill=(8, 8, 16))
+        d.rectangle([(0, 0), (W - 1, H - 1)], fill=t.BG_DIM)
 
         d.rectangle([(4, 4), (W - 5, 38)], fill=app["color"])
-        d.text((12, 8), app["name"], font=self._ft, fill=(0, 0, 0))
+        d.text((12, 8), name, font=self._ft, fill=t.ON_ACCENT)
 
         cx, cy = W // 2, 68
-        d.ellipse([(cx - 28, cy - 28), (cx + 28, cy + 28)], fill=(15, 15, 25), outline=app["color"], width=3)
-        d.text((cx - 14, cy - 16), app["icon"], font=_find_font(36), fill=app["color"])
+        d.ellipse([(cx - 28, cy - 28), (cx + 28, cy + 28)], fill=t.BG_MID, outline=ac, width=3)
+        d.text((cx - 14, cy - 16), app["icon"], font=_find_font(36), fill=ac)
 
-        d.text((W // 2 - 80, 118), app["desc"], font=self._fb_desc, fill=(170, 180, 200))
+        d.text((W // 2 - 80, 118), desc, font=self._fb_desc, fill=t.TEXT_DIM)
 
         num = str(self._idx + 1)
-        d.text((W // 2 - 15, 150), num, font=self._fb_num, fill=app["color"])
+        d.text((W // 2 - 15, 150), num, font=self._fb_num, fill=ac)
 
-        d.rectangle([(4, 190), (W - 5, 215)], outline=(40, 40, 50))
-        d.text((W // 2 - 55, 195), "ENTER para lanzar", font=self._fs, fill=(120, 130, 150))
+        d.rectangle([(4, 190), (W - 5, 215)], outline=t.BG_LIGHT)
+        d.text((W // 2 - 55, 195), "ENTER para lanzar", font=self._fs, fill=t.TEXT_MUTED)
 
         if self._state:
             music = self._state.get_music()
             if music.is_playing:
                 m_name = os.path.basename(music.current_file)[:18] if music.current_file else ""
-                d.rectangle([(4, H - 18), (W - 5, H - 4)], fill=(20, 10, 30))
-                d.text((8, H - 17), f"\u266B {m_name}", font=self._fs, fill=(180, 80, 255))
+                d.rectangle([(4, H - 18), (W - 5, H - 4)], fill=t.BG_MID)
+                d.text((8, H - 17), f"\u266B {m_name}", font=self._fs, fill=accent((180, 80, 255)))

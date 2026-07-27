@@ -36,3 +36,8 @@ height = 240
 telemetry_interval = 5
 gps_refresh_interval = 2
 map_tile_cache = /tmp/maptiles
+
+[ui]
+# Tema de la interfaz: night (oscuro, default) o day (claro, para sol directo)
+# Se puede cambiar en caliente desde el menú principal > Tema
+theme = night
