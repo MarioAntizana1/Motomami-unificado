@@ -1,6 +1,6 @@
 # Memoria del Proyecto - MotoMami Ultimate
 
-_Actualizado: 2026-07-18_
+_Actualizado: 2026-07-26_
 
 ---
 
@@ -113,10 +113,11 @@ SIM7600 (_request_gps_info @1Hz + _read_nmea @5-10Hz)
 
 ## MQTT Monitor App
 
-- **Servicio**: `MqttListenerService` (en `src/services/mqtt_listener.py`) — se suscribe a `motomami/#` en Mosquitto local, actualiza `Esp32VelocimetroState` y `Esp32DireccionalesState` en `SystemState`
+- **Servicio**: `MqttListenerService` (en `src/services/mqtt_listener.py`) — se suscribe a `motomami/#` en Mosquitto local, actualiza `Esp32VelocimetroState`, `Esp32DireccionalesState` y `Esp32InputState` en `SystemState`
 - **App**: `MqttMonitorApp` (en `src/apps/mqtt_monitor_app.py`) — canvas 640x240 (fb2 izq + fb1 der)
-  - **Izquierda (fb2)**: Velocímetro — velocidad grande, barra gráfica, distancia, odómetro, pulsos
-  - **Derecha (fb1)**: Direccionales — flechas izq/der, emergencia, frenado, luz nocturna + intensidad, intensidad general
+  - **Izquierda (fb2)**: Velocímetro 320x240 — velocidad grande, barra gráfica, distancia, odómetro, pulsos
+  - **Derecha arriba (fb1)**: Direccionales 320x160 — flechas izq/der, emergencia, frenado, luz nocturna, intensidades (compacto), IP/RSSI/ID en 1 línea
+  - **Derecha abajo (fb1)**: Input 320x80 — status dot + IP/RSSI/ID (header verde)
 - **Refresco**: 300ms (para seguir las publicaciones del ESP32 cada 300ms)
 - **Menu key**: `"mqtt"` en `main_menu.py`, launcher en `main.py`
 - **Config**: `MQTT_LOCAL_HOST = 192.168.42.1`, `MQTT_LOCAL_PORT = 1883` (configurable en `config_loader.py`)
@@ -125,12 +126,16 @@ SIM7600 (_request_gps_info @1Hz + _read_nmea @5-10Hz)
 
 | Topic | De | Payload |
 |-------|----|---------|
-| `motomami/velocimetro/data` | ESP32 velo | `{"s":speed,"d":dist,"p":pulses}` cada 300ms |
+| `motomami/velocimetro/data` | ESP32 velo | `{"s":speed,"d":dist,"p":pulses,"id":dev_id}` cada 300ms |
 | `motomami/velocimetro/odometro` | ESP32 velo | `"1.234"` (float string, al conectar) |
 | `motomami/velocimetro/status` | ESP32 velo | `"online"/"offline"` (last will) |
+| `motomami/velocimetro/ip` `rssi` `id` | ESP32 velo | metadata (retain) |
 | `motomami/status` | ESP32 dir | `"online"/"offline"` (last will) |
-| `motomami/status/ip` | ESP32 dir | IP string (al conectar) |
-| `motomami/status/rssi` | ESP32 dir | RSSI string (cada ~20s) |
+| `motomami/status/ip` `rssi` `id` | ESP32 dir | IP / RSSI / device id (retain) |
+| `motomami-input/status` | ESP32 input | `"online"/"offline"` (last will) |
+| `motomami-input/status/ip` `rssi` `id` | ESP32 input | metadata (retain) |
+
+**Nota**: el módulo input publica comandos con prefijo `<msg_id>:` (ej. `42:ON`) — `_strip_msg_id()` lo remueve antes de parsear.
 
 ### Topics de control (recibidos por ESP32, monitoreados para estado)
 
@@ -153,8 +158,57 @@ SIM7600 (_request_gps_info @1Hz + _read_nmea @5-10Hz)
 
 ---
 
+## Sesión 2026-07-26 — Xbox BT fix + Tema día/noche + Crispy Doom
+
+### 1. Fix mando Xbox Bluetooth (bug encontrado)
+
+**Causa raíz**: `src/libs/vp_controller.py` no existía (se borró con la limpieza de `final/`). El `InputManager` hacía `from vp_controller import XboxController` → ImportError silencioso → `self._xbox_cls = None` → Xbox NUNCA se inicializaba. "Emparejado" en la app Conexiones es solo a nivel BlueZ; eso no crea `/dev/input/js0`.
+
+**Fix aplicado**:
+- `src/libs/vp_controller.py` restaurado desde git history (`final/src/libs/vp_controller.py`), con `CONTROLLER_DEADZONE = 0.3` inline (sin dependencia de `vp_config`)
+- `src/core/input_manager.py`: **hot-plug** — si `_xbox is None` o `connected == False`, reintenta `_init_xbox()` cada `XBOX_RETRY_INTERVAL = 3.0s`. Detecta desconexión en runtime (el read_loop de XboxController pone `connected=False` al morir) y reconecta solo.
+- Testeado con mocks: reintento tras fallo, detección de desconexión y reconexión OK
+
+**PENDIENTE EN RPI (cuando vuelva SSH)** — para que `/dev/input/js0` aparezca con Xbox One/Series por BT:
+```bash
+# Verificar primero: conectar mando y ver si existe
+ls /dev/input/js*
+# Si NO aparece → desactivar ERTM (problema conocido Xbox BT en Linux):
+echo 'options bluetooth disable_ertm=1' | sudo tee /etc/modprobe.d/bluetooth.conf
+sudo reboot
+# Alternativa más robusta: instalar xpadneo (driver DKMS para Xbox BT)
+# Verificar eventos: sudo evtest
+```
+
+### 2. Tema día/noche
+
+- **`src/libs/theme.py`** (nuevo): dataclass `Theme` (BG/TEXT/ACCENT/semánticos), paletas `NIGHT` (default) y `DAY` (fondo claro 232,234,238, texto oscuro), acentos por app `_APP_ACCENTS`, `get_theme(app)`, `get_mode()`, `set_mode()`, `toggle_mode()`, helper `accent(color)` que oscurece ×0.55 en modo día para legibilidad. **Persiste en `config.ini` `[ui] theme`** (escribe con configparser sin borrar otras claves).
+- **Toggle**: entrada `"Tema"` en `main_menu.py` APPS (key `theme`) — ENTER cambia modo al instante sin salir del menú. Muestra "Tema: Día/Noche" dinámico.
+- **Apps migradas**: `main_menu.py` (completa) y `mqtt_monitor_app.py` (clase `_Palette` derivada del tema por render).
+- **PENDIENTE**: migrar resto de apps al tema (gps_display, bluetooth_manager, connections, music, video, gps_diag, doom) — mismo patrón: `get_theme(app)` + `accent()`.
+
+### 3. Crispy Doom (mouselook)
+
+- Chocolate Doom NO puede mirar arriba/abajo (fiel al Doom original, el motor no renderiza pitch vertical).
+- `doom_app.py` `_find_doom_binary()`: ahora prefiere **`crispy-doom`** (fork de Chocolate con mouselook, mismo peso), fallback chocolate-doom.
+- **PENDIENTE EN RPI**: `sudo apt install crispy-doom` + activar mouselook (`crispy-doom -setup` → Mouse → Enable mouse look, o `~/.local/share/crispy-doom/crispy-doom.cfg` → `mouse_look 1`).
+
+### Decisiones tomadas
+
+- **Quake**: pospuesto. Quake 1 viable en Zero 2W solo con motor software (tyrquake/SDLQuake); QuakeSpasm/GL muy pesado. Se haría un `quake_app.py` estilo `doom_app.py` (Xvfb+mss).
+- **Pantalla HDMI**: el usuario la compró (llega en unos días). Migración fb1/fb2→fb0 pendiente. Ventajas: 60fps GPU, juegos nativos sin hack Xvfb+mss, RetroArch posible. Riesgo: legibilidad solar (necesita panel high-brightness) y consumo.
+- **Modo día es solo paleta** — el ST7789 no tiene control de brillo en este setup.
+
+---
+
 ## Pendientes / Observaciones
 
+- [ ] **RPi offline** (SSH timeout toda la sesión 2026-07-26) — deploy pendiente: commits `c4ee086` (MQTT 3 ESP32) y `e5834d3` (Xbox fix + tema + crispy) ya pusheados a GitHub, falta curl a RPi + restart
+- [ ] **ERTM/xpadneo en RPi** — ver sección Xbox fix arriba (sin esto, `/dev/input/js0` no aparece)
+- [ ] **crispy-doom en RPI** — `sudo apt install crispy-doom` + activar mouselook
+- [ ] Migrar apps restantes al tema día/noche (gps_display, bluetooth, connections, music, video, doom, gps_diag)
+- [ ] Pantalla HDMI (llega en unos días) — plan de migración fb1/fb2→fb0
+- [ ] Quake launcher (pospuesto hasta tener HDMI o a petición)
 - [ ] Revisar si `config.ini.example` necesita sincronizarse con `config.ini`
 - [ ] Verificar que el fix del callback solucionó el problema de coordenadas estáticas en ThingsBoard
 - [ ] RPi no tiene git — considerar clonar el repo con `git clone` para facilitar deploys futuros
