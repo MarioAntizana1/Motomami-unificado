@@ -129,9 +129,9 @@ class MqttListenerService(threading.Thread):
         elif topic == "motomami/intensidad":
             self._handle_intensidad(payload, "intensidad")
         elif topic == "motomami/intermitente_izquierda":
-            self._state.update_esp32_direccionales(intermitente_izq=(payload == "ON"))
-        elif topic == "motomami/intermitente_derecha":
             self._state.update_esp32_direccionales(intermitente_der=(payload == "ON"))
+        elif topic == "motomami/intermitente_derecha":
+            self._state.update_esp32_direccionales(intermitente_izq=(payload == "ON"))
         elif topic == "motomami/intermitente_emergencia":
             self._state.update_esp32_direccionales(emergencia=(payload == "ON"))
 
