@@ -237,6 +237,14 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - Row 1: ◄ L:ON/OFF (amarillo), ► R:ON/OFF (amarillo), ▲ EM:ON/OFF (rojo)
 - Row 2: ■ BR:ON/OFF (rojo), ◉ NT:ON/OFF (azul), timestamp
 
+### Bug: fb_daemon legacy al 99% CPU pisando framebuffer
+
+**Causa**: El service legacy `motomami-fb.service` ejecutaba `final/src/fb_daemon.py` (heredero del sistema `final/`). Estaba **enabled** y se iniciaba en boot, consumiendo 99% CPU y escribiendo al framebuffer constantemente, pisando todo lo que escribiera el nuevo sistema unificado.
+
+**Fix**: `systemctl stop motomami-fb.service && systemctl disable motomami-fb.service`
+
+**Lección**: Al migrar de `final/` a `src/`, verificar que ningún service legacy esté habilitado. El nuevo sistema escribe directo a `/dev/fb*` via mmap, no necesita daemon externo.
+
 ### Deploy a RPi
 
 - **Repo correcto**: `MarioAntizana1/Motomami-unificado` en GitHub (NO `wenup/Rpi-motomami-ultimate`)
