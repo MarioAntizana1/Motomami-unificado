@@ -275,32 +275,63 @@ class MqttMonitorApp:
         stale = inp is not None and (time.time() - inp.last_update) > 30.0
         has_data = inp is not None and inp.last_update > 0
 
-        d.rectangle([(0, 0), (W - 1, 18)], fill=C.HDR)
+        d.rectangle([(0, 0), (W - 1, 16)], fill=C.HDR)
         d.text((6, 1), "INPUT", font=self._f_small, fill=C.WHITE)
 
         dot_color = C.GREEN if (online and not stale) else (C.YELLOW if stale and has_data else C.RED)
-        d.ellipse([(W - 16, 3), (W - 6, 13)], fill=dot_color)
+        d.ellipse([(W - 16, 2), (W - 6, 12)], fill=dot_color)
         status_txt = "ONLINE" if (online and not stale) else ("STALE" if stale and has_data else "OFF")
         d.text((W - 78, 1), status_txt, font=self._f_small, fill=dot_color)
+
+        if not has_data:
+            d.text((10, 32), "Esperando datos...", font=self._f_small, fill=C.DIM)
+            return img
 
         ip = inp.ip if inp is not None else ""
         rssi = inp.rssi if inp is not None else ""
         iid = inp.id if inp is not None else ""
-        if has_data:
-            parts = []
-            if ip: parts.append(f"IP:{ip}")
-            if rssi: parts.append(f"RSSI:{rssi}dBm")
-            if iid: parts.append(f"ID:{iid}")
-            line = "  ".join(parts) if parts else "Conectado"
-            d.text((6, 22), line, font=self._f_small, fill=C.BLUE)
-        else:
-            d.text((6, 22), "Esperando datos...", font=self._f_small, fill=C.DIM)
+        parts = []
+        if ip: parts.append(f"IP:{ip}")
+        if rssi: parts.append(f"{rssi}dBm")
+        if iid: parts.append(f"ID:{iid}")
+        d.text((6, 18), "  ".join(parts), font=self._f_small, fill=C.BLUE)
 
-        if has_data:
-            from datetime import datetime, timezone, timedelta
-            utc = datetime.fromtimestamp(inp.last_update, tz=timezone.utc)
-            lt = utc.astimezone(timezone(timedelta(hours=-5)))
-            d.text((W - 80, H - 12), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C.DIM)
+        left  = inp.left if inp is not None else False
+        right = inp.right if inp is not None else False
+        emerg = inp.emerg if inp is not None else False
+        brake = inp.brake if inp is not None else False
+        night = inp.night if inp is not None else False
+
+        def sd(v): return "ON" if v else "OFF"
+
+        y = 36
+        # Row 1: LEFT, RIGHT, EMERG
+        c_l = C.YELLOW if left else C.OFF
+        d.polygon([(12, y+4), (26, y), (26, y+8)], fill=c_l)
+        d.text((30, y), f"L:{sd(left)}", font=self._f_small, fill=c_l)
+
+        c_r = C.YELLOW if right else C.OFF
+        d.polygon([(90, y+4), (76, y), (76, y+8)], fill=c_r)
+        d.text((94, y), f"R:{sd(right)}", font=self._f_small, fill=c_r)
+
+        c_e = C.RED if emerg else C.OFF
+        d.polygon([(155, y+6), (148, y+1), (162, y+1)], fill=c_e)
+        d.text((166, y), f"EM:{sd(emerg)}", font=self._f_small, fill=c_e)
+
+        # Row 2: BRAKE, NIGHT, timestamp
+        y += 15
+        c_b = C.RED if brake else C.OFF
+        d.rectangle([(12, y+1), (26, y+7)], fill=c_b)
+        d.text((30, y), f"BR:{sd(brake)}", font=self._f_small, fill=c_b)
+
+        c_n = C.BLUE if night else C.OFF
+        d.ellipse([(102, y), (116, y+8)], fill=c_n)
+        d.text((120, y), f"NT:{sd(night)}", font=self._f_small, fill=c_n)
+
+        from datetime import datetime, timezone, timedelta
+        utc = datetime.fromtimestamp(inp.last_update, tz=timezone.utc)
+        lt = utc.astimezone(timezone(timedelta(hours=-5)))
+        d.text((W - 80, y), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C.DIM)
 
         return img
 
@@ -310,6 +341,6 @@ class MqttMonitorApp:
         d = self._fb.draw()
         d.text((60, 100), "MONITOR MQTT", font=_find_font(22), fill=C.BLUE)
         d.text((380, 100), "ESP32 DATOS", font=_find_font(22), fill=C.GREEN)
-        d.text((60, 135), "Escuchando motomami/#...", font=_find_font(14), fill=C.WHITE)
+        d.text((60, 135), "Escuchando motomami/# + motomami-input/#...", font=_find_font(14), fill=C.WHITE)
         self._fb.update()
         time.sleep(1)

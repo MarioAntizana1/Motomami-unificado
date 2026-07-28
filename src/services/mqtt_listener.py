@@ -57,6 +57,7 @@ class MqttListenerService(threading.Thread):
         print(f"[MQTT-Listener] Conectando a {MQTT_LOCAL_HOST}:{MQTT_LOCAL_PORT}...")
         self._client.connect(MQTT_LOCAL_HOST, MQTT_LOCAL_PORT, 60)
         self._client.subscribe("motomami/#", qos=1)
+        self._client.subscribe("motomami-input/#", qos=1)
 
         while not self._stop_event.is_set():
             self._client.loop(timeout=0.5)
@@ -81,6 +82,7 @@ class MqttListenerService(threading.Thread):
         if rc == 0:
             print(f"[MQTT-Listener] Conectado a Mosquitto en {MQTT_LOCAL_HOST}")
             client.subscribe("motomami/#", qos=1)
+            client.subscribe("motomami-input/#", qos=1)
         else:
             print(f"[MQTT-Listener] Error conexión (rc={rc})")
 
@@ -142,6 +144,21 @@ class MqttListenerService(threading.Thread):
             self._state.update_esp32_input(rssi=payload)
         elif topic == "motomami-input/status/id":
             self._state.update_esp32_input(id=payload)
+        elif topic == "motomami-input/data":
+            self._handle_input_data(payload)
+
+    def _handle_input_data(self, payload: str):
+        """Parse 'LLLLL' (LEFT,RIGHT,EMERG,BRAKE,NIGHT) del topic motomami-input/data.
+        GPIO con pull-up: '0' = presionado (LOW), '1' = liberado (HIGH)."""
+        if len(payload) < 5:
+            return
+        self._state.update_esp32_input(
+            left=(payload[0] == "0"),
+            right=(payload[1] == "0"),
+            emerg=(payload[2] == "0"),
+            brake=(payload[3] == "0"),
+            night=(payload[4] == "0"),
+        )
 
     @staticmethod
     def _strip_msg_id(payload: str) -> str:
