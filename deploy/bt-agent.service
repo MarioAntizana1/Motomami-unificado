@@ -1,0 +1,14 @@
+[Unit]
+Description=Bluetooth Agent NoInputNoOutput for Xbox auto-pairing
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -B -u /usr/local/bin/bt-agent.py
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
