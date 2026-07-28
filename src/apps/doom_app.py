@@ -122,17 +122,19 @@ class DoomApp:
         print("[Doom] Lanzando Xvfb...")
         try:
             self.xvfb_process = subprocess.Popen(
-                ["Xvfb", ":99", "-screen", "0", "320x240x24", "-nolisten", "tcp"],
+                ["Xvfb", ":99", "-screen", "0", "640x480x24", "-nolisten", "tcp"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            time.sleep(1) # Esperar a que Xvfb inicie
+            time.sleep(1)
             
             print("[Doom] Lanzando Chocolate Doom...")
             env = os.environ.copy()
             env["DISPLAY"] = ":99"
+            env["SDL_VIDEO_WINDOW_POS"] = "0,0"
+            env["SDL_VIDEO_CENTERED"] = "0"
             
-            cmd = [doom_bin, "-window", "-geometry", "320x240"]
+            cmd = [doom_bin, "-width", "320", "-height", "200", "-window"]
             selected_wad = self.wads[self.selected_wad_idx]
             if selected_wad != "Autodetectar WAD del sistema":
                 cmd.extend(["-iwad", selected_wad])
@@ -190,12 +192,12 @@ class DoomApp:
         os.environ["DISPLAY"] = ":99"
         
         with mss.mss() as sct:
-            monitor = sct.monitors[1]
             while self.game_running:
                 try:
-                    sct_img = sct.grab(monitor)
-                    # Convertir de BGRA a RGB
+                    sct_img = sct.grab(sct.monitors[1])
                     img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+                    if img.size != (320, 240):
+                        img = img.resize((320, 240), Image.NEAREST)
                     self._draw_game_frame(img)
                 except Exception as e:
                     print(f"[Doom Capture] Error: {e}")
