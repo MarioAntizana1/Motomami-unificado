@@ -1,0 +1,17 @@
+[Unit]
+Description=Xboxdrv Daemon for Xbox One S Bluetooth controller
+After=bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=/bin/sleep 3
+ExecStart=/usr/bin/xboxdrv --detach-kernel-driver --dbus=disabled --silent
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
