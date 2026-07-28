@@ -111,6 +111,11 @@ class Esp32InputState:
     ip: str = ""
     rssi: str = ""
     id: str = ""
+    left: bool = False
+    right: bool = False
+    emerg: bool = False
+    brake: bool = False
+    night: bool = False
     last_update: float = 0.0
 
 

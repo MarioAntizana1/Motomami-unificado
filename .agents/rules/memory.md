@@ -1,6 +1,6 @@
 # Memoria del Proyecto - MotoMami Ultimate
 
-_Actualizado: 2026-07-26_
+_Actualizado: 2026-07-27_
 
 ---
 
@@ -113,11 +113,12 @@ SIM7600 (_request_gps_info @1Hz + _read_nmea @5-10Hz)
 
 ## MQTT Monitor App
 
-- **Servicio**: `MqttListenerService` (en `src/services/mqtt_listener.py`) — se suscribe a `motomami/#` en Mosquitto local, actualiza `Esp32VelocimetroState`, `Esp32DireccionalesState` y `Esp32InputState` en `SystemState`
+- **Servicio**: `MqttListenerService` (en `src/services/mqtt_listener.py`) — se suscribe a `motomami/#` y `motomami-input/#` en Mosquitto local, actualiza `Esp32VelocimetroState`, `Esp32DireccionalesState` y `Esp32InputState` en `SystemState`
+- **⚠️ Importante**: `motomami/#` NO matchea `motomami-input/...#` (MQTT wildcards no cruzan `-` en top-level topic). Requiere segunda suscripción explícita `motomami-input/#`.
 - **App**: `MqttMonitorApp` (en `src/apps/mqtt_monitor_app.py`) — canvas 640x240 (fb2 izq + fb1 der)
   - **Izquierda (fb2)**: Velocímetro 320x240 — velocidad grande, barra gráfica, distancia, odómetro, pulsos
   - **Derecha arriba (fb1)**: Direccionales 320x160 — flechas izq/der, emergencia, frenado, luz nocturna, intensidades (compacto), IP/RSSI/ID en 1 línea
-  - **Derecha abajo (fb1)**: Input 320x80 — status dot + IP/RSSI/ID (header verde)
+  - **Derecha abajo (fb1)**: Input 320x80 — status dot + IP/RSSI/ID + 5 botones con indicadores: ◄ LEFT, ► RIGHT, ▲ EMERG, ■ BRAKE, ☽ NIGHT (con colores ON/OFF)
 - **Refresco**: 300ms (para seguir las publicaciones del ESP32 cada 300ms)
 - **Menu key**: `"mqtt"` en `main_menu.py`, launcher en `main.py`
 - **Config**: `MQTT_LOCAL_HOST = 192.168.42.1`, `MQTT_LOCAL_PORT = 1883` (configurable en `config_loader.py`)
@@ -134,6 +135,7 @@ SIM7600 (_request_gps_info @1Hz + _read_nmea @5-10Hz)
 | `motomami/status/ip` `rssi` `id` | ESP32 dir | IP / RSSI / device id (retain) |
 | `motomami-input/status` | ESP32 input | `"online"/"offline"` (last will) |
 | `motomami-input/status/ip` `rssi` `id` | ESP32 input | metadata (retain) |
+| `motomami-input/data` | ESP32 input | `<msg_id>:<5chars>` donde cada char es GPIO level del pin (0=presionado/pull-down, 1=liberado/pull-up). Parse: `left=[0]`, `right=[1]`, `emerg=[2]`, `brake=[3]`, `night=[4]`. Frecuencia: ~300ms. |
 
 **Nota**: el módulo input publica comandos con prefijo `<msg_id>:` (ej. `42:ON`) — `_strip_msg_id()` lo remueve antes de parsear.
 
@@ -201,10 +203,51 @@ sudo reboot
 
 ---
 
+## Sesión 2026-07-27 — Deploy RPi + Bug MQTT input no refresca (causa raíz)
+
+### Logros
+
+1. **RPi online** ✅ - SSH a 192.168.31.195 funcional, los 3 ESP32 conectados al AP Motomami-net
+2. **ERTM desactivado** ✅ - `disable_ertm=1` aplicado y verificado tras reboot
+3. **Xbox emparejado** ✅ - MAC `F4:6A:D7:3F:FE:CD`, necesita encender mando en modo pairing para conectar
+4. **MQTT datos vivos verificados** ✅ - velo 300ms OK, direccionales status/ip/rssi/id OK
+5. **Input ESP32 SÍ publica** ✅ - `motomami-input/status`, `motomami-input/data`, `ip`, `rssi`, `id` — todos existen y fluyen cada 300ms
+
+### Bug encontrado: MQTT wildcard no matchea input
+
+**Causa raíz**: El listener suscribía solo `motomami/#`. En MQTT, `motomami/#` NO matchea `motomami-input/status` porque `motomami-` ≠ `motomami/` como primer nivel del topic. El wildcard `#` solo expande dentro del mismo árbol de jerarquías.
+
+**Confirmación empírica**: `mosquitto_sub -t 'motomami/#' -v` NO muestra topics `motomami-input/...`, pero `mosquitto_sub -t 'motomami-input/#' -v` SÍ muestra `status`, `data`, `ip`, `rssi`, `id`.
+
+**Fix aplicado en `mqtt_listener.py`**:
+- `_connect_and_listen()`: segunda suscripción `client.subscribe("motomami-input/#", qos=1)`
+- `_on_connect()`: misma segunda suscripción para reconexión
+
+### Bug menor: lógica invertida en `_handle_input_data`
+
+**Causa**: GPIO pull-up: HIGH=1 (liberado), LOW=0 (presionado). El código trataba `payload[X] == "1"` como True, pero `"1"` significa NO presionado.
+
+**Fix**: `payload[X] == "0"` ahora significa presionado/activo.
+
+### Mejora: `_render_input` ahora muestra estados de los 5 botones
+
+El panel input (320x80, abajo derecha) ahora muestra:
+- Header "INPUT" + status dot
+- IP/RSSI/ID en línea compacta
+- Row 1: ◄ L:ON/OFF (amarillo), ► R:ON/OFF (amarillo), ▲ EM:ON/OFF (rojo)
+- Row 2: ■ BR:ON/OFF (rojo), ◉ NT:ON/OFF (azul), timestamp
+
+### Deploy a RPi
+
+- **Repo correcto**: `MarioAntizana1/Motomami-unificado` en GitHub (NO `wenup/Rpi-motomami-ultimate`)
+- **Ruta en RPi**: `/home/motomami/moto/` (NO `/home/motomami/motomami-ultimate/`)
+- `curl` desde `raw.githubusercontent.com/MarioAntizana1/Motomami-unificado/<COMMIT>/<PATH>`
+- Service restart OK, logs sin errores
+
 ## Pendientes / Observaciones
 
-- [ ] **RPi offline** (SSH timeout toda la sesión 2026-07-26) — deploy pendiente: commits `c4ee086` (MQTT 3 ESP32) y `e5834d3` (Xbox fix + tema + crispy) ya pusheados a GitHub, falta curl a RPi + restart
-- [ ] **ERTM/xpadneo en RPi** — ver sección Xbox fix arriba (sin esto, `/dev/input/js0` no aparece)
+- [X] ~~RPi offline~~ ✅ Conectado, ERTM desactivado, servicio corriendo
+- [ ] **Xbox conectar** — encender mando en modo pairing (botón pair) para que `/dev/input/js0` aparezca vía BlueZ + ERTM off
 - [ ] **crispy-doom en RPI** — `sudo apt install crispy-doom` + activar mouselook
 - [ ] Migrar apps restantes al tema día/noche (gps_display, bluetooth, connections, music, video, doom, gps_diag)
 - [ ] Pantalla HDMI (llega en unos días) — plan de migración fb1/fb2→fb0

@@ -55,7 +55,9 @@ sudo journalctl -u motomami -f               # Ver logs
 Después de cada cambio en `src/` (o cualquier modificación que afecte al sistema en ejecución):
 
 1. **Commit + Push** a GitHub (`main`)
-2. **Actualizar RPi** — descargar archivos desde raw.githubusercontent.com
+2. **Actualizar RPi** — descargar archivos desde `https://raw.githubusercontent.com/MarioAntizana1/Motomami-unificado/<COMMIT>/<PATH>`
+   - Ruta en RPi: `/home/motomami/moto/` (no `/home/motomami/motomami-ultimate/`)
+   - Usar `curl -sL -o /home/motomami/moto/src/...`
 3. **Actualizar Graphify** — `graphify update .` (sin costo de API)
 4. **Reiniciar servicio** — `ssh-rpi_sudo-exec "systemctl restart motomami"`
 

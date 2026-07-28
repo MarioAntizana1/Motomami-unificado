@@ -177,13 +177,18 @@ static void rssi_timer_cb(TimerHandle_t tmr) {
     publish_rssi_id();
 }
 
+static void start_mqtt(void);
+
 static void wifi_retry_cb(void *arg) {
     esp_wifi_connect();
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        ESP_LOGI(TAG, "WiFi STA started, connecting...");
         esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        ESP_LOGI(TAG, "WiFi asociado al AP");
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGW(TAG, "WiFi desconectado, reintento en 1 s...");
         if (wifi_retry_timer) {
@@ -196,6 +201,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, voi
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
         esp_ip4addr_ntoa(&ev->ip_info.ip, ip_str, sizeof(ip_str));
         ESP_LOGI(TAG, "WiFi conectado - IP: %s", ip_str);
+        start_mqtt();
         ota_server_start();
     }
 }
@@ -222,6 +228,23 @@ static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, vo
         ESP_LOGW(TAG, "MQTT desconectado");
         xEventGroupClearBits(mqtt_group, 1);
     }
+}
+
+static void start_mqtt(void) {
+    if (mqtt_client) return;
+    esp_mqtt_client_config_t mqttcfg = {
+        .broker = {.address = {.uri = BROKER_URI}},
+        .network = {.reconnect_timeout_ms = MQTT_RECONNECT_MS},
+        .session = {.last_will = {
+            .topic = TOPIC_STATUS,
+            .msg = "offline",
+            .qos = 1,
+            .retain = true,
+        }},
+    };
+    mqtt_client = esp_mqtt_client_init(&mqttcfg);
+    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, mqtt_client);
+    esp_mqtt_client_start(mqtt_client);
 }
 
 void app_main(void) {
@@ -259,6 +282,10 @@ void app_main(void) {
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     esp_wifi_init(&wcfg);
+    /* Antena externa u.FL: GPIO14=HIGH activa el RF switch del XIAO C6 */
+    gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_NUM_14, 1);
+
     /* El AP (RPi) esta en la propia moto a <2 m: 10 dBm sobra.
      * Reduce el pico de corriente, el consumo y el calor. */
     esp_wifi_set_max_tx_power(40);
@@ -280,21 +307,6 @@ void app_main(void) {
     esp_wifi_set_mode(WIFI_MODE_STA);
     esp_wifi_set_config(WIFI_IF_STA, &wificfg);
     esp_wifi_start();
-
-    /* MQTT arranca de inmediato (no bloqueante): esp_mqtt reintenta solo */
-    esp_mqtt_client_config_t mqttcfg = {
-        .broker = {.address = {.uri = BROKER_URI}},
-        .network = {.reconnect_timeout_ms = MQTT_RECONNECT_MS},
-        .session = {.last_will = {
-            .topic = TOPIC_STATUS,
-            .msg = "offline",
-            .qos = 1,
-            .retain = true,
-        }},
-    };
-    mqtt_client = esp_mqtt_client_init(&mqttcfg);
-    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, mqtt_client);
-    esp_mqtt_client_start(mqtt_client);
 
     TimerHandle_t rssi_timer = xTimerCreate("rssi_tmr", pdMS_TO_TICKS(RSSI_INTERVAL_MS), pdTRUE, NULL, rssi_timer_cb);
     xTimerStart(rssi_timer, 0);
