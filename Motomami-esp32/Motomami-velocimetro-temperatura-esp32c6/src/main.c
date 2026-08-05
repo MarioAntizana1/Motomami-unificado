@@ -41,7 +41,8 @@
 #define PULSES_PER_REV 3U
 #define WHEEL_DIAMETER_CM 43.18f
 #define MIN_LOW_US 20000LL
-#define EDGE_DEBOUNCE_US 2000LL
+#define MIN_HIGH_US 8000LL
+#define MIN_PULSE_GAP_US 10000LL
 
 /* Telemetria */
 #define SPEED_TIMEOUT_MS 3000LL
@@ -75,10 +76,18 @@ static char ip_str[16] = {0};
 /* Estado del sensor, compartido con la ISR */
 static volatile uint32_t pulse_count = 0;
 static volatile bool pulse_ready = false;
-static volatile bool sensor_in_low = false;
-static volatile int64_t first_low_us = 0;
-static volatile int64_t last_pulse_us = 0;
-static volatile uint32_t pulse_period_us = 0;
+static int64_t last_pulse_us = 0;
+static uint32_t pulse_period_us = 0;
+
+typedef enum {
+    SENSOR_HIGH_STABLE,
+    SENSOR_LOW_CANDIDATE,
+    SENSOR_LOW_STABLE,
+    SENSOR_HIGH_CANDIDATE,
+} sensor_state_t;
+
+static sensor_state_t sensor_state = SENSOR_HIGH_STABLE;
+static int64_t sensor_state_since_us = 0;
 
 /* Estado persistente y MQTT */
 static uint32_t nvs_offset = 0;
@@ -102,41 +111,65 @@ static float total_distance_km(void)
 }
 
 /*
- * El sensor confirmado funciona asi:
- *   HIGH en reposo -> LOW al pasar el iman -> HIGH al salir.
- * Solo se cuenta la subida despues de un LOW estable. Un HIGH corto dentro
- * de la ventana LOW se ignora para evitar los saltos de pulsos por ruido.
+ * Filtro de estados ejecutado cada 1 ms:
+ * - LOW debe durar 20 ms para ser una activacion valida.
+ * - HIGH debe durar 8 ms para cerrar el pulso.
+ * - Un cambio corto vuelve al estado anterior y no cuenta.
  */
-static void IRAM_ATTR sensor_isr(void *arg)
+static void sample_sensor(int level, int64_t now)
 {
-    const int64_t now = esp_timer_get_time();
-    const int level = gpio_get_level(SENSOR_PIN);
+    switch (sensor_state) {
+    case SENSOR_HIGH_STABLE:
+        if (level == 0) {
+            sensor_state = SENSOR_LOW_CANDIDATE;
+            sensor_state_since_us = now;
+        }
+        break;
 
-    if (level == 0) {
-        if (!sensor_in_low) {
-            if (last_pulse_us > 0 && (now - last_pulse_us) < EDGE_DEBOUNCE_US) {
-                return;
+    case SENSOR_LOW_CANDIDATE:
+        if (level == 1) {
+            /* LOW corto: ruido, no iniciar un pulso. */
+            sensor_state = SENSOR_HIGH_STABLE;
+            sensor_state_since_us = now;
+        } else if ((now - sensor_state_since_us) >= MIN_LOW_US) {
+            sensor_state = SENSOR_LOW_STABLE;
+        }
+        break;
+
+    case SENSOR_LOW_STABLE:
+        if (level == 1) {
+            sensor_state = SENSOR_HIGH_CANDIDATE;
+            sensor_state_since_us = now;
+        }
+        break;
+
+    case SENSOR_HIGH_CANDIDATE:
+        if (level == 0) {
+            /* HIGH corto: rebote, sigue siendo el mismo LOW. */
+            sensor_state = SENSOR_LOW_STABLE;
+        } else if ((now - sensor_state_since_us) >= MIN_HIGH_US) {
+            const int64_t pulse_at = sensor_state_since_us;
+            const int64_t gap = pulse_at - last_pulse_us;
+
+            if (last_pulse_us == 0 || gap >= MIN_PULSE_GAP_US) {
+                if (last_pulse_us > 0 && gap <= UINT32_MAX) {
+                    const uint32_t sample_period = (uint32_t)gap;
+                    if (pulse_period_us == 0) {
+                        pulse_period_us = sample_period;
+                    } else {
+                        /* Media movil simple: reduce saltos de velocidad. */
+                        pulse_period_us = (pulse_period_us * 3U + sample_period) / 4U;
+                    }
+                }
+                last_pulse_us = pulse_at;
+                pulse_count++;
+                pulse_ready = true;
             }
-            first_low_us = now;
-            sensor_in_low = true;
+            sensor_state = SENSOR_HIGH_STABLE;
+            sensor_state_since_us = now;
         }
-        return;
+        break;
     }
-
-    if (!sensor_in_low || (now - first_low_us) < MIN_LOW_US) {
-        return;
-    }
-
-    if (last_pulse_us > 0) {
-        const int64_t period = now - last_pulse_us;
-        if (period > 0 && period <= UINT32_MAX) {
-            pulse_period_us = (uint32_t)period;
-        }
-    }
-    last_pulse_us = now;
-    pulse_count++;
-    pulse_ready = true;
-    sensor_in_low = false;
 }
 
 static uint32_t load_nvs_pulses(void)
@@ -208,9 +241,10 @@ static void publish_data(void)
     char payload[160];
 
     snprintf(payload, sizeof(payload),
-             "{\"id\":%lu,\"s\":%.1f,\"d\":%.3f,\"m\":%.1f,\"o\":%.3f,\"p\":%lu}",
+             "{\"id\":%lu,\"s\":%.1f,\"d\":%.3f,\"m\":%.1f,\"o\":%.3f,\"p\":%lu,\"dt\":%lu}",
              (unsigned long)++message_id, speed, kilometers, meters,
-             kilometers, (unsigned long)total);
+             kilometers, (unsigned long)total,
+             (unsigned long)(pulse_period_us / 1000U));
     publish_topic(TOPIC_DATA, payload, 0, false);
 }
 
@@ -350,13 +384,8 @@ void app_main(void)
     ESP_ERROR_CHECK(gpio_config(&sensor_config));
 
     const int initial_level = gpio_get_level(SENSOR_PIN);
-    if (initial_level == 0) {
-        sensor_in_low = true;
-        first_low_us = esp_timer_get_time();
-    }
-
-    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(SENSOR_PIN, sensor_isr, NULL));
+    sensor_state = initial_level == 0 ? SENSOR_LOW_CANDIDATE : SENSOR_HIGH_STABLE;
+    sensor_state_since_us = esp_timer_get_time();
 
     /* El LED refleja directamente el nivel del sensor, como en el debug. */
     gpio_config_t led_config = {
@@ -414,7 +443,9 @@ void app_main(void)
     TickType_t last_debug = last_mqtt;
 
     while (true) {
+        const int64_t now_us = esp_timer_get_time();
         const int pin_level = gpio_get_level(SENSOR_PIN);
+        sample_sensor(pin_level, now_us);
         gpio_set_level(LED_PIN, pin_level);
 
         bool pulse_event = pulse_ready;

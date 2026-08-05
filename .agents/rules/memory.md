@@ -317,3 +317,11 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - RPi AP confirmado en `192.168.42.1`, velocimetro identificado en `192.168.42.17`.
 - El RTL8192EU requirio reseat fisico; `wlan1`/`Motomami-net` volvio a transmitir.
 - Para OTA desde la PC: servidor HTTP local en `192.168.31.173:8000`, RPi descarga el `.bin` y hace POST al ESP en `192.168.42.17`.
+
+## Session 2026-08-05 -- Diagnostico de pulsos y UI
+
+- El ESP tenia un bug en la maquina ISR: un HIGH corto antes de completar `MIN_LOW_US` dejaba el inicio LOW antiguo, y un ciclo posterior podia contarse aunque el LOW real fuera corto.
+- Se reemplazo por estados muestreados cada 1 ms: `HIGH_STABLE`, `LOW_CANDIDATE`, `LOW_STABLE`, `HIGH_CANDIDATE`; LOW minimo 20 ms, HIGH minimo 8 ms y separacion minima entre pulsos de 10 ms.
+- El periodo de velocidad usa media movil simple 3/4 para reducir saltos; el payload agrega `dt` en milisegundos.
+- Monitor visual actualizado con tarjetas de velocidad, recorrido en m/km, odometro, pulsos, sensor, RSSI, IP e ID; colores derivados del tema para mejor contraste en modo dia.
+- Verificacion MQTT en RPi: `status online`, `ip 192.168.42.17`, RSSI y payload `s/d/m/o/p` recibidos.

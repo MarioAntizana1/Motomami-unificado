@@ -26,11 +26,15 @@ class _Palette:
     def __init__(self):
         t = get_theme("mqtt")
         self.BG     = t.BG
+        self.PANEL  = t.BG_DIM
+        self.PANEL_ALT = t.BG_MID
+        self.BORDER = t.BG_LIGHT
         self.WHITE  = t.TEXT
         self.DIM    = t.TEXT_MUTED
         self.OFF    = t.BG_LIGHT
         self.BAR_BG = t.BG_LIGHT
         self.HDR    = t.BG_MID
+        self.ACCENT = accent(t.ACCENT)
         self.GREEN  = accent(t.GOOD)
         self.ON     = accent(t.GOOD)
         self.BLUE   = accent((0, 180, 255))
@@ -101,74 +105,75 @@ class MqttMonitorApp:
         stale = velo is not None and (time.time() - velo.last_update) > 5.0
         has_data = velo is not None and velo.last_update > 0
 
-        # Barra superior
-        d.rectangle([(0, 0), (W - 1, 20)], fill=C.HDR)
-        d.text((6, 2), "VELOCIMETRO", font=self._f_small, fill=C.WHITE)
+        # Header HUD
+        d.rectangle([(0, 0), (W - 1, 22)], fill=C.HDR)
+        d.rectangle([(0, 0), (3, 22)], fill=C.ACCENT)
+        d.text((9, 3), "VELOCIMETRO", font=self._f_small, fill=C.WHITE)
 
         dot_color = C.GREEN if (online and not stale) else (C.YELLOW if stale and has_data else C.RED)
-        d.ellipse([(W - 18, 4), (W - 6, 16)], fill=dot_color)
+        d.ellipse([(W - 18, 5), (W - 7, 16)], fill=dot_color)
         status_txt = "ONLINE" if (online and not stale) else ("STALE" if stale and has_data else "OFF")
-        d.text((W - 85, 2), status_txt, font=self._f_small, fill=dot_color)
+        d.text((W - 78, 3), status_txt, font=self._f_small, fill=dot_color)
 
-        # ── Velocidad (grande) ──
-        speed = velo.speed if velo is not None else 0
-        speed_str = f"{speed:.1f}"
-        d.text((20, 36), speed_str, font=self._f_huge, fill=C.WHITE if has_data else C.DIM)
+        speed = max(0.0, velo.speed if velo is not None else 0.0)
+        speed_str = f"{speed:.1f}" if has_data else "--.-"
+
+        # Tarjeta principal de velocidad
+        d.rectangle([(8, 29), (W - 9, 106)], fill=C.PANEL, outline=C.BORDER)
+        d.text((17, 34), speed_str, font=self._f_huge,
+               fill=C.ACCENT if has_data else C.DIM)
         bb = d.textbbox((0, 0), speed_str, font=self._f_huge)
-        d.text((24 + bb[2], 80), "km/h", font=self._f_normal, fill=C.DIM)
+        unit_x = min(W - 66, 22 + bb[2])
+        d.text((unit_x, 78), "km/h", font=self._f_normal, fill=C.DIM)
 
-        # Barra de velocidad gráfica
-        bar_w = W - 40
-        bar_x = 20
-        bar_y = 110
+        # Barra de velocidad con umbrales visuales
+        bar_x, bar_y, bar_w = 18, 99, W - 36
         fill_pct = min(speed / 120.0, 1.0) if has_data else 0
-        d.rectangle([(bar_x, bar_y), (bar_x + bar_w, bar_y + 8)], fill=C.BAR_BG)
-        d.rectangle([(bar_x, bar_y), (bar_x + int(bar_w * fill_pct), bar_y + 8)],
-                    fill=C.GREEN if fill_pct < 0.7 else (C.YELLOW if fill_pct < 0.9 else C.RED))
+        d.rectangle([(bar_x, bar_y), (bar_x + bar_w, bar_y + 5)], fill=C.BAR_BG)
+        if fill_pct > 0:
+            bar_color = C.GREEN if fill_pct < 0.7 else (C.YELLOW if fill_pct < 0.9 else C.RED)
+            d.rectangle([(bar_x, bar_y), (bar_x + max(2, int(bar_w * fill_pct)), bar_y + 5)], fill=bar_color)
 
-        # ── Línea separadora ──
-        d.line([(10, 128), (W - 10, 128)], fill=C.BAR_BG)
-
-        # ── Recorrido, Odómetro, Pulsos ──
+        # Distancia y odometro en tarjetas simetricas
         dist_m = velo.distance_m if velo is not None else 0
         if dist_m <= 0 and velo is not None:
             dist_m = max(0.0, velo.distance * 1000.0)
-        odo  = velo.odometro if velo is not None else 0
-        pul  = velo.pulses if velo is not None else 0
+        odo = velo.odometro if velo is not None else 0
+        pul = velo.pulses if velo is not None else 0
+        dist_str = f"{dist_m:.0f} m" if dist_m < 1000 else f"{dist_m / 1000.0:.3f} km"
 
-        if dist_m < 1000:
-            dist_str = f"{dist_m:.0f} m"
-        else:
-            dist_str = f"{dist_m / 1000.0:.3f} km"
+        d.rectangle([(8, 113), (154, 169)], fill=C.PANEL, outline=C.BORDER)
+        d.rectangle([(164, 113), (311, 169)], fill=C.PANEL, outline=C.BORDER)
+        d.text((15, 118), "RECORRIDO", font=self._f_small, fill=C.DIM)
+        d.text((15, 136), dist_str, font=self._f_normal, fill=C.BLUE if has_data else C.DIM)
+        d.text((171, 118), "ODOMETRO", font=self._f_small, fill=C.DIM)
+        d.text((171, 136), f"{odo:.3f} km", font=self._f_normal, fill=C.YELLOW if has_data else C.DIM)
 
-        y = 136
-        d.text((14, y),     "RECORRIDO", font=self._f_small, fill=C.DIM)
-        d.text((14, y + 14), dist_str, font=self._f_normal, fill=C.BLUE if has_data else C.DIM)
+        # Pulsos y estado del sensor
+        d.rectangle([(8, 176), (154, 204)], fill=C.PANEL_ALT, outline=C.BORDER)
+        d.rectangle([(164, 176), (311, 204)], fill=C.PANEL_ALT, outline=C.BORDER)
+        d.text((15, 180), "PULSOS", font=self._f_small, fill=C.DIM)
+        d.text((82, 180), f"{pul:,}" if has_data else "--", font=self._f_normal,
+               fill=C.WHITE if has_data else C.DIM)
+        sensor_level = velo.sensor_level if velo is not None else -1
+        sensor_on = sensor_level == 0
+        sensor_text = "SENSOR ON" if sensor_on else ("SENSOR OFF" if sensor_level == 1 else "SENSOR --")
+        d.text((171, 180), sensor_text, font=self._f_small,
+               fill=C.GREEN if sensor_on else C.DIM)
 
-        d.text((W // 2 + 10, y),     "ODOMETRO", font=self._f_small, fill=C.DIM)
-        d.text((W // 2 + 10, y + 14), f"{odo:.3f} km", font=self._f_normal, fill=C.YELLOW if has_data else C.DIM)
-
-        y = 176
-        d.text((14, y),     "PULSOS", font=self._f_small, fill=C.DIM)
-        d.text((14, y + 14), f"{pul:,}" if has_data else "--", font=self._f_normal, fill=C.WHITE if has_data else C.DIM)
-
-        # Metadata del módulo del velocímetro
+        # Metadata compacta y consistente en ambos temas
         velo_ip = velo.ip if velo is not None else ""
         velo_rssi = velo.rssi if velo is not None else ""
         velo_id = velo.id if velo is not None else ""
-        sensor_level = velo.sensor_level if velo is not None else -1
-        sensor_text = "S:ON" if sensor_level == 0 else ("S:OFF" if sensor_level == 1 else "S:--")
-        metadata = f"{sensor_text}  RSSI:{velo_rssi or '--'}"
-        d.text((14, 208), metadata, font=self._f_small, fill=C.BLUE if has_data else C.DIM)
-        module_info = f"IP:{velo_ip or '--'}  ID:{velo_id or '--'}"
-        d.text((14, 224), module_info[:42], font=self._f_small, fill=C.DIM)
-
-        # ── Última actualización ──
+        metadata = f"RSSI:{velo_rssi or '--'}"
         if has_data:
             from datetime import datetime, timezone, timedelta
             utc = datetime.fromtimestamp(velo.last_update, tz=timezone.utc)
             lt = utc.astimezone(timezone(timedelta(hours=-5)))
-            d.text((W - 72, 208), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C.DIM)
+            metadata += f"  {lt.strftime('%H:%M:%S')}"
+        d.text((15, 208), metadata, font=self._f_small, fill=C.BLUE if has_data else C.DIM)
+        module_info = f"IP:{velo_ip or '--'} ID:{velo_id or '--'}"
+        d.text((15, 224), module_info[:48], font=self._f_small, fill=C.DIM)
 
         return img
 
