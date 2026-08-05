@@ -129,14 +129,21 @@ class MqttMonitorApp:
         # ── Línea separadora ──
         d.line([(10, 128), (W - 10, 128)], fill=C.BAR_BG)
 
-        # ── Distancia, Odómetro, Pulsos ──
-        dist = velo.distance if velo is not None else 0
+        # ── Recorrido, Odómetro, Pulsos ──
+        dist_m = velo.distance_m if velo is not None else 0
+        if dist_m <= 0 and velo is not None:
+            dist_m = max(0.0, velo.distance * 1000.0)
         odo  = velo.odometro if velo is not None else 0
         pul  = velo.pulses if velo is not None else 0
 
+        if dist_m < 1000:
+            dist_str = f"{dist_m:.0f} m"
+        else:
+            dist_str = f"{dist_m / 1000.0:.3f} km"
+
         y = 136
-        d.text((14, y),     "DISTANCIA", font=self._f_small, fill=C.DIM)
-        d.text((14, y + 14), f"{dist:.3f} km", font=self._f_normal, fill=C.BLUE if has_data else C.DIM)
+        d.text((14, y),     "RECORRIDO", font=self._f_small, fill=C.DIM)
+        d.text((14, y + 14), dist_str, font=self._f_normal, fill=C.BLUE if has_data else C.DIM)
 
         d.text((W // 2 + 10, y),     "ODOMETRO", font=self._f_small, fill=C.DIM)
         d.text((W // 2 + 10, y + 14), f"{odo:.3f} km", font=self._f_normal, fill=C.YELLOW if has_data else C.DIM)
@@ -145,14 +152,23 @@ class MqttMonitorApp:
         d.text((14, y),     "PULSOS", font=self._f_small, fill=C.DIM)
         d.text((14, y + 14), f"{pul:,}" if has_data else "--", font=self._f_normal, fill=C.WHITE if has_data else C.DIM)
 
+        # Metadata del módulo del velocímetro
+        velo_ip = velo.ip if velo is not None else ""
+        velo_rssi = velo.rssi if velo is not None else ""
+        velo_id = velo.id if velo is not None else ""
+        sensor_level = velo.sensor_level if velo is not None else -1
+        sensor_text = "S:ON" if sensor_level == 0 else ("S:OFF" if sensor_level == 1 else "S:--")
+        metadata = f"{sensor_text}  RSSI:{velo_rssi or '--'}"
+        d.text((14, 208), metadata, font=self._f_small, fill=C.BLUE if has_data else C.DIM)
+        module_info = f"IP:{velo_ip or '--'}  ID:{velo_id or '--'}"
+        d.text((14, 224), module_info[:42], font=self._f_small, fill=C.DIM)
+
         # ── Última actualización ──
         if has_data:
             from datetime import datetime, timezone, timedelta
             utc = datetime.fromtimestamp(velo.last_update, tz=timezone.utc)
             lt = utc.astimezone(timezone(timedelta(hours=-5)))
-            d.text((W - 100, H - 14), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C.DIM)
-        else:
-            d.text((W - 100, H - 14), "---", font=self._f_small, fill=C.DIM)
+            d.text((W - 72, 208), lt.strftime("%H:%M:%S"), font=self._f_small, fill=C.DIM)
 
         return img
 

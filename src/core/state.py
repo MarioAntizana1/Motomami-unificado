@@ -95,8 +95,10 @@ class Esp32VelocimetroState:
     """Datos del ESP32 velocímetro vía MQTT."""
     speed: float = 0.0        # km/h
     distance: float = 0.0     # km total
+    distance_m: float = 0.0   # metros totales, para recorridos cortos
     odometro: float = 0.0     # km odómetro
     pulses: int = 0
+    sensor_level: int = -1    # GPIO21: 0=activo, 1=reposo
     online: bool = False
     ip: str = ""
     rssi: str = ""

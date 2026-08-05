@@ -263,3 +263,57 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - [ ] Revisar si `config.ini.example` necesita sincronizarse con `config.ini`
 - [ ] Verificar que el fix del callback solucionó el problema de coordenadas estáticas en ThingsBoard
 - [ ] RPi no tiene git — considerar clonar el repo con `git clone` para facilitar deploys futuros
+
+---
+
+## Session 2026-07-28 — Xbox BT agent + HOG plugin + MQTT fixes
+
+### Completed
+- **MQTT wildcard bug**: Added second subscription `motomami-input/#` — confirmed `motomami/#` does NOT match `motomami-input/.../` topics
+- **MQTT input logic**: Inverted `_handle_input_data` — `"0"` = pressed (GPIO pull-up: '1'=HIGH/released, '0'=LOW/pressed)
+- **Input panel**: `_render_input` shows 5 buttons (LEFT, RIGHT, EMERG, BRAKE, NIGHT) with colored indicators
+- **Swap IZQ/DER**: Hardcoded swap for `intermitente_izquierda` ↔ `intermitente_der` due to physical wiring error
+- **state.py on RPi**: Downloaded with `Esp32InputState` fields `left/right/emerg/brake/night`
+- **fb_daemon legacy**: `systemctl stop/disable motomami-fb.service` (was 99% CPU, overwriting framebuffer)
+- **Doom fix**: Xvfb 320×240 fullscreen (no `-window`), `-width 320 -height 200`, capture direct without resize
+- **Bluetooth agent**: `deploy/bt-agent.py` — NoInputNoOutput agent via D-Bus for auto-pairing Xbox. Fixed `set_as_default=True` param name. Systemd service at `deploy/bt-agent.service`, running as `bt-agent.service`
+- **Bluetooth HOG plugin**: Override `/etc/systemd/system/bluetooth.service.d/hog.conf` with `ExecStart=/usr/libexec/bluetooth/bluetoothd --plugin=hog`. `uhid` kernel module loaded.
+- **Xbox One S paired**: Successfully paired F4:6A:D7:3F:FE:CD via `bluetoothctl pair` with agent running. HID GATT service (00001812) detected.
+- **xpad restored**: Removed blacklist, `xpad` driver loaded for USB mode
+- **AGENTS.md**: Updated with correct deploy URLs (MarioAntizana1/Motomami-unificado)
+
+### Blockers
+- **HOG input device**: Even after pairing, no `/dev/input/js*` or new event device created. Next connection attempt (user presses Xbox button) should trigger HOG to read HID report over encrypted connection.
+- **Deploy URL issue**: `curl` from GitHub raw content was inconsistent — some files still had old content after download. Used `python3` to write files directly on RPi as workaround.
+
+### Technical notes
+- `DBusGMainLoop` param is `set_as_default=True` (NOT `set_default_as_default` or `set_default_main_loop`)
+- Python `.pyc` bytecode cache in `/usr/local/bin/__pycache__/` must be cleared after replacing script
+- Use `python3 -B -u` to avoid bytecode cache and unbuffer stdout
+- `bluetoothctl show` does NOT show registered agent info on BlueZ 5.82
+
+---
+
+## Session 2026-08-05 -- Velocimetro integrado y AP WiFi
+
+### Velocimetro ESP32-C6
+
+- Firmware del proyecto `Motomami-esp32/Motomami-velocimetro-temperatura-esp32c6` simplificado primero para diagnostico y luego ampliado para produccion.
+- Sensor Hall en GPIO21: HIGH en reposo, LOW al pasar el iman; cuenta al volver a HIGH despues de LOW estable >=20 ms. Esto elimino saltos de pulsos por ruido.
+- Rueda nominal 3.50-10: diametro 43.18 cm, circunferencia ~1.356 m, 0.452 m por pulso con 3 pulsos/revolucion.
+- NVS guarda el total de pulsos cada 250 pulsos y al detenerse; el odometro sobrevive reinicios.
+- MQTT: `motomami/velocimetro/data` con `id`, `s` (km/h), `d` (km), `m` (metros), `o` (odometro km), `p` (pulsos); publica cada 200 ms y tambien inmediatamente despues de un pulso.
+- Metadata conservada: `status`, `odometro`, `ip`, `rssi`, `id`; OTA continua en `POST /ota` con `X-OTA-Token`.
+- LED GPIO15 refleja el nivel del sensor para debug visual.
+
+### Monitor MQTT
+
+- `Esp32VelocimetroState` ahora guarda `distance_m` y `sensor_level`.
+- `mqtt_listener.py` parsea los campos nuevos y el topic `motomami/velocimetro/debug`.
+- Panel izquierdo muestra recorrido en metros/km, odometro, pulsos, sensor, RSSI, IP e ID.
+
+### AP y deploy
+
+- RPi AP confirmado en `192.168.42.1`, velocimetro identificado en `192.168.42.17`.
+- El RTL8192EU requirio reseat fisico; `wlan1`/`Motomami-net` volvio a transmitir.
+- Para OTA desde la PC: servidor HTTP local en `192.168.31.173:8000`, RPi descarga el `.bin` y hace POST al ESP en `192.168.42.17`.

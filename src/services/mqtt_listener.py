@@ -102,6 +102,8 @@ class MqttListenerService(threading.Thread):
             self._handle_velo_data(payload)
         elif topic == "motomami/velocimetro/odometro":
             self._handle_velo_odometro(payload)
+        elif topic == "motomami/velocimetro/debug":
+            self._handle_velo_debug(payload)
         elif topic == "motomami/velocimetro/status":
             self._state.update_esp32_velocimetro(online=(payload.lower() == "online"))
         elif topic == "motomami/velocimetro/ip":
@@ -173,15 +175,21 @@ class MqttListenerService(threading.Thread):
     def _handle_velo_data(self, payload: str):
         try:
             data = json.loads(payload)
+            distance_km = float(data.get("d", data.get("distance_km", 0)))
+            distance_m = float(data.get("m", distance_km * 1000.0))
             kwargs = dict(
                 speed=float(data.get("s", 0)),
-                distance=float(data.get("d", 0)),
+                distance=distance_km,
+                distance_m=distance_m,
                 pulses=int(data.get("p", 0)),
                 online=True,
             )
             raw_id = data.get("id")
             if raw_id is not None:
                 kwargs["id"] = str(raw_id)
+            raw_odo = data.get("o", data.get("odometro"))
+            if raw_odo is not None:
+                kwargs["odometro"] = float(raw_odo)
             self._state.update_esp32_velocimetro(**kwargs)
         except (json.JSONDecodeError, ValueError):
             pass
@@ -190,6 +198,20 @@ class MqttListenerService(threading.Thread):
         try:
             self._state.update_esp32_velocimetro(odometro=float(payload))
         except ValueError:
+            pass
+
+    def _handle_velo_debug(self, payload: str):
+        """Actualiza el nivel GPIO publicado por el firmware de diagnóstico."""
+        try:
+            data = json.loads(payload)
+            raw_level = data.get("pin", data.get("pin_lvl"))
+            kwargs = {"online": True}
+            if raw_level is not None:
+                kwargs["sensor_level"] = int(raw_level)
+            if data.get("pulses") is not None:
+                kwargs["pulses"] = int(data["pulses"])
+            self._state.update_esp32_velocimetro(**kwargs)
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
     def _handle_intensidad(self, payload: str, field: str):

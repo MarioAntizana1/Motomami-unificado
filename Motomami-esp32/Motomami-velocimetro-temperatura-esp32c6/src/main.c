@@ -1,238 +1,305 @@
+/*
+ * Velocimetro MQTT para MotoMami.
+ *
+ * Sensor Hall: GPIO21, activo en LOW y validado al volver a HIGH.
+ * Rueda 3.50-10: diametro nominal 43.18 cm, 3 pulsos por revolucion.
+ * OTA: ota_server.c mantiene POST /ota disponible en la red Motomami-net.
+ */
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
+
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
-#include "freertos/event_groups.h"
-#include "esp_system.h"
-#include "esp_wifi.h"
+#include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
-#include "esp_timer.h"
-#include "nvs_flash.h"
 #include "esp_netif.h"
-#include "driver/gpio.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include "mqtt_client.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "ota_server.h"
 
-#define WIFI_SSID           "Motomami-net"
-#define WIFI_PASS           "ktiarts123+++++/"
-#define BROKER_URI          "mqtt://192.168.42.1:1883"
+#define WIFI_SSID "Motomami-net"
+#define WIFI_PASS "ktiarts123+++++/"
+#define BROKER_URI "mqtt://192.168.42.1:1883"
 
-#define SENSOR_PIN          GPIO_NUM_21
-#define TAG                 "VELOCIMETRO"
-#define DEBOUNCE_US         2000        /* 2 ms reales via esp_timer (IRAM-safe) */
-#define PULSES_PER_REV      3
-#define WHEEL_DIAMETER_CM   43.0f
-#define SPEED_TIMEOUT_MS    3000
-#define MQTT_INTERVAL_MS    300
-#define NVS_SAVE_PULSES     250
-#define RSSI_INTERVAL_MS    21000
-#define WIFI_RETRY_US       (1000 * 1000)   /* backoff 1 s reconexion WiFi */
-#define MQTT_RECONNECT_MS   1000            /* reconexion MQTT rapida */
+#define SENSOR_PIN GPIO_NUM_21
+#define LED_PIN GPIO_NUM_15
 
-#define TOPIC_DATA          "motomami/velocimetro/data"
-#define TOPIC_ODO           "motomami/velocimetro/odometro"
-#define TOPIC_STATUS        "motomami/velocimetro/status"
-#define TOPIC_IP            "motomami/velocimetro/ip"
-#define TOPIC_RSSI          "motomami/velocimetro/rssi"
-#define TOPIC_ID            "motomami/velocimetro/id"
+#define TAG "VELOCIMETRO"
+#define PI_F 3.14159265358979323846f
 
-#define DIST_PER_PULSE      (float)((M_PI * WHEEL_DIAMETER_CM) / (100.0f * PULSES_PER_REV))
-#define SPEED_FACTOR        (float)(12.0f * M_PI * WHEEL_DIAMETER_CM)
+/* Sensor y rueda */
+#define PULSES_PER_REV 3U
+#define WHEEL_DIAMETER_CM 43.18f
+#define MIN_LOW_US 20000LL
+#define EDGE_DEBOUNCE_US 2000LL
 
-#define NVS_NS              "velocimetro"
-#define NVS_KEY             "pulses"
+/* Telemetria */
+#define SPEED_TIMEOUT_MS 3000LL
+#define MQTT_INTERVAL_MS 200
+#define RSSI_INTERVAL_MS 10000
+#define NVS_SAVE_PULSES 250U
+#define WIFI_RETRY_US 1000000LL
+#define MQTT_RECONNECT_MS 1000
 
-typedef enum {
-    WAITING_RISING,
-    WAITING_FALLING,
-} pulse_state_t;
+/* Topics existentes consumidos por monitor-mqtt */
+#define TOPIC_DATA "motomami/velocimetro/data"
+#define TOPIC_DEBUG "motomami/velocimetro/debug"
+#define TOPIC_ODO "motomami/velocimetro/odometro"
+#define TOPIC_STATUS "motomami/velocimetro/status"
+#define TOPIC_IP "motomami/velocimetro/ip"
+#define TOPIC_RSSI "motomami/velocimetro/rssi"
+#define TOPIC_ID "motomami/velocimetro/id"
+
+#define NVS_NAMESPACE "velocimetro"
+#define NVS_KEY_PULSES "pulses"
+
+static const float wheel_circumference_m = PI_F * (WHEEL_DIAMETER_CM / 100.0f);
+static const float distance_per_pulse_m =
+    (PI_F * (WHEEL_DIAMETER_CM / 100.0f)) / (float)PULSES_PER_REV;
 
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 static EventGroupHandle_t mqtt_group = NULL;
 static esp_timer_handle_t wifi_retry_timer = NULL;
-
-static volatile pulse_state_t pulse_state = WAITING_RISING;
-static volatile uint32_t pulse_count = 0;
-static volatile bool pulse_ready = false;
-static volatile int64_t last_edge_us = 0;
-static volatile int64_t last_pulse_us = 0;      /* timestamp del ultimo pulso contado */
-static volatile uint32_t pulse_period_ms = 0;   /* periodo entre los 2 ultimos pulsos */
-
-static uint32_t nvs_offset = 0;
-static uint32_t last_saved = 0;
-static uint32_t msg_id = 0;
-static bool stopped_saved = true;               /* arranca "guardado" (NVS recien cargado) */
 static char ip_str[16] = {0};
 
-/* ==================================================================
- * ISR — debounce real de 2 ms con esp_timer (funciona en IRAM) y
- * medicion del periodo entre pulsos consecutivos contados.
- * ================================================================== */
-static void IRAM_ATTR sensor_isr(void *arg) {
-    int64_t now = esp_timer_get_time();
+/* Estado del sensor, compartido con la ISR */
+static volatile uint32_t pulse_count = 0;
+static volatile bool pulse_ready = false;
+static volatile bool sensor_in_low = false;
+static volatile int64_t first_low_us = 0;
+static volatile int64_t last_pulse_us = 0;
+static volatile uint32_t pulse_period_us = 0;
 
-    if ((now - last_edge_us) < DEBOUNCE_US) {
-        return;
-    }
-    last_edge_us = now;
+/* Estado persistente y MQTT */
+static uint32_t nvs_offset = 0;
+static uint32_t last_saved_pulses = 0;
+static uint32_t message_id = 0;
+static bool stopped_saved = true;
 
-    int level = gpio_get_level(SENSOR_PIN);
-
-    if (level == 1) {
-        if (pulse_state == WAITING_RISING) {
-            pulse_state = WAITING_FALLING;
-        }
-    } else {
-        if (pulse_state == WAITING_FALLING) {
-            pulse_state = WAITING_RISING;
-            pulse_count++;
-            if (last_pulse_us > 0) {
-                pulse_period_ms = (uint32_t)((now - last_pulse_us) / 1000);
-            }
-            last_pulse_us = now;
-            pulse_ready = true;
-        }
-    }
-}
-
-static uint32_t load_nvs(void) {
-    nvs_handle_t h;
-    uint32_t val = 0;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) == ESP_OK) {
-        nvs_get_u32(h, NVS_KEY, &val);
-        nvs_close(h);
-    }
-    return val;
-}
-
-static void save_nvs(uint32_t total) {
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u32(h, NVS_KEY, total);
-        nvs_commit(h);
-        nvs_close(h);
-        ESP_LOGI(TAG, "Odometro guardado en NVS: %lu pulsos", total);
-    }
-}
-
-static uint32_t total_pulses(void) {
+static uint32_t total_pulses(void)
+{
     return nvs_offset + pulse_count;
 }
 
-static void publish(const char *topic, const char *data, int len, int qos, bool retain) {
-    if (mqtt_client && (xEventGroupGetBits(mqtt_group) & 1)) {
-        esp_mqtt_client_publish(mqtt_client, topic, data, len, qos, retain ? 1 : 0);
+static float total_distance_m(void)
+{
+    return (float)total_pulses() * distance_per_pulse_m;
+}
+
+static float total_distance_km(void)
+{
+    return total_distance_m() / 1000.0f;
+}
+
+/*
+ * El sensor confirmado funciona asi:
+ *   HIGH en reposo -> LOW al pasar el iman -> HIGH al salir.
+ * Solo se cuenta la subida despues de un LOW estable. Un HIGH corto dentro
+ * de la ventana LOW se ignora para evitar los saltos de pulsos por ruido.
+ */
+static void IRAM_ATTR sensor_isr(void *arg)
+{
+    const int64_t now = esp_timer_get_time();
+    const int level = gpio_get_level(SENSOR_PIN);
+
+    if (level == 0) {
+        if (!sensor_in_low) {
+            if (last_pulse_us > 0 && (now - last_pulse_us) < EDGE_DEBOUNCE_US) {
+                return;
+            }
+            first_low_us = now;
+            sensor_in_low = true;
+        }
+        return;
+    }
+
+    if (!sensor_in_low || (now - first_low_us) < MIN_LOW_US) {
+        return;
+    }
+
+    if (last_pulse_us > 0) {
+        const int64_t period = now - last_pulse_us;
+        if (period > 0 && period <= UINT32_MAX) {
+            pulse_period_us = (uint32_t)period;
+        }
+    }
+    last_pulse_us = now;
+    pulse_count++;
+    pulse_ready = true;
+    sensor_in_low = false;
+}
+
+static uint32_t load_nvs_pulses(void)
+{
+    nvs_handle_t handle;
+    uint32_t value = 0;
+
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) == ESP_OK) {
+        nvs_get_u32(handle, NVS_KEY_PULSES, &value);
+        nvs_close(handle);
+    }
+    return value;
+}
+
+static void save_nvs_pulses(uint32_t total)
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "No se pudo abrir NVS para guardar odometro");
+        return;
+    }
+
+    esp_err_t err = nvs_set_u32(handle, NVS_KEY_PULSES, total);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Odometro guardado: %lu pulsos (%.3f km)",
+                 (unsigned long)total, total * distance_per_pulse_m / 1000.0f);
+    } else {
+        ESP_LOGE(TAG, "Error guardando NVS: %s", esp_err_to_name(err));
     }
 }
 
-/* Velocidad actual en km/h.
- * Usa el periodo medido entre los dos ultimos pulsos (lo guarda el ISR).
- * Si la rueda desacelera (el tiempo desde el ultimo pulso supera al
- * periodo) la lectura decae suavemente; sin pulsos por SPEED_TIMEOUT_MS
- * la velocidad es 0. Sin pulsos desde el boot -> 0 (sin fantasma). */
-static float current_speed(void) {
-    int64_t last = last_pulse_us;
-    if (last == 0) {
+static void publish_topic(const char *topic, const char *payload, int qos, bool retain)
+{
+    if (mqtt_client != NULL && mqtt_group != NULL &&
+        (xEventGroupGetBits(mqtt_group) & 1U) != 0U) {
+        esp_mqtt_client_publish(mqtt_client, topic, payload, -1, qos, retain ? 1 : 0);
+    }
+}
+
+static float current_speed_kmh(void)
+{
+    const int64_t last = last_pulse_us;
+    const uint32_t period = pulse_period_us;
+
+    if (last == 0 || period == 0) {
         return 0.0f;
     }
-    int64_t since_ms = (esp_timer_get_time() - last) / 1000;
-    if (since_ms >= SPEED_TIMEOUT_MS) {
+
+    const int64_t elapsed = esp_timer_get_time() - last;
+    if (elapsed >= SPEED_TIMEOUT_MS * 1000LL) {
         return 0.0f;
     }
-    uint32_t period = pulse_period_ms;
-    if (period == 0) {
-        return 0.0f;   /* un solo pulso: aun no hay periodo medible */
-    }
-    uint32_t effective = (since_ms > (int64_t)period) ? (uint32_t)since_ms : period;
-    return SPEED_FACTOR / (float)effective;
+
+    const int64_t effective_period = elapsed > (int64_t)period ? elapsed : period;
+    return (distance_per_pulse_m * 3600000000.0f) / (float)effective_period;
 }
 
-static void publish_data(void) {
-    uint32_t total = total_pulses();
-    float dist_km = total * DIST_PER_PULSE / 1000.0f;
-    float speed = current_speed();
+static void publish_data(void)
+{
+    const uint32_t total = total_pulses();
+    const float meters = total_distance_m();
+    const float kilometers = meters / 1000.0f;
+    const float speed = current_speed_kmh();
+    char payload[160];
 
-    char payload[96];
-    snprintf(payload, sizeof(payload), "{\"id\":%lu,\"s\":%.1f,\"d\":%.3f,\"p\":%lu}",
-             ++msg_id, speed, dist_km, total);
-    publish(TOPIC_DATA, payload, -1, 0, false);
+    snprintf(payload, sizeof(payload),
+             "{\"id\":%lu,\"s\":%.1f,\"d\":%.3f,\"m\":%.1f,\"o\":%.3f,\"p\":%lu}",
+             (unsigned long)++message_id, speed, kilometers, meters,
+             kilometers, (unsigned long)total);
+    publish_topic(TOPIC_DATA, payload, 0, false);
 }
 
-static void publish_rssi_id(void) {
+static void publish_odometer(void)
+{
+    char payload[24];
+    snprintf(payload, sizeof(payload), "%.3f", total_distance_km());
+    publish_topic(TOPIC_ODO, payload, 1, true);
+}
+
+static void publish_rssi_id(void)
+{
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        char rssi_str[8];
-        snprintf(rssi_str, sizeof(rssi_str), "%d", ap.rssi);
-        publish(TOPIC_RSSI, rssi_str, -1, 0, true);
+        char rssi[12];
+        snprintf(rssi, sizeof(rssi), "%d", ap.rssi);
+        publish_topic(TOPIC_RSSI, rssi, 1, true);
     }
-    char id_str[12];
-    snprintf(id_str, sizeof(id_str), "%lu", msg_id);
-    publish(TOPIC_ID, id_str, -1, 0, true);
+
+    char id[16];
+    snprintf(id, sizeof(id), "%lu", (unsigned long)message_id);
+    publish_topic(TOPIC_ID, id, 1, true);
 }
 
-static void rssi_timer_cb(TimerHandle_t tmr) {
+static void rssi_timer_callback(TimerHandle_t timer)
+{
+    (void)timer;
     publish_rssi_id();
 }
 
 static void start_mqtt(void);
 
-static void wifi_retry_cb(void *arg) {
+static void wifi_retry_callback(void *arg)
+{
+    (void)arg;
     esp_wifi_connect();
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
+static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "WiFi STA started, connecting...");
+        ESP_LOGI(TAG, "WiFi iniciado, conectando a %s", WIFI_SSID);
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
-        ESP_LOGI(TAG, "WiFi asociado al AP");
+        ESP_LOGI(TAG, "WiFi asociado a Motomami-net");
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "WiFi desconectado, reintento en 1 s...");
-        if (wifi_retry_timer) {
+        ESP_LOGW(TAG, "WiFi desconectado, reintento en 1 s");
+        if (wifi_retry_timer != NULL) {
+            esp_timer_stop(wifi_retry_timer);
             esp_timer_start_once(wifi_retry_timer, WIFI_RETRY_US);
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
-        if (wifi_retry_timer) {
-            esp_timer_stop(wifi_retry_timer);
-        }
-        ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
-        esp_ip4addr_ntoa(&ev->ip_info.ip, ip_str, sizeof(ip_str));
-        ESP_LOGI(TAG, "WiFi conectado - IP: %s", ip_str);
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)data;
+        esp_ip4addr_ntoa(&event->ip_info.ip, ip_str, sizeof(ip_str));
+        ESP_LOGI(TAG, "WiFi OK - IP %s", ip_str);
         start_mqtt();
         ota_server_start();
     }
 }
 
-static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, void *data) {
-    esp_mqtt_event_handle_t ev = (esp_mqtt_event_handle_t)data;
+static void mqtt_event_handler(void *args, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)args;
+    (void)base;
+    esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)data;
 
-    if (ev->event_id == MQTT_EVENT_CONNECTED) {
+    if (event->event_id == MQTT_EVENT_CONNECTED) {
         ESP_LOGI(TAG, "MQTT conectado a %s", BROKER_URI);
-        xEventGroupSetBits(mqtt_group, 1);
-
-        esp_mqtt_client_publish(mqtt_client, TOPIC_STATUS, "online", -1, 1, 1);
-
-        uint32_t total = total_pulses();
-        float dist_km = total * DIST_PER_PULSE / 1000.0f;
-        char odo[16];
-        snprintf(odo, sizeof(odo), "%.3f", dist_km);
-        esp_mqtt_client_publish(mqtt_client, TOPIC_ODO, odo, -1, 1, 1);
-
-        esp_mqtt_client_publish(mqtt_client, TOPIC_IP, ip_str, -1, 1, 1);
-
+        xEventGroupSetBits(mqtt_group, 1U);
+        publish_topic(TOPIC_STATUS, "online", 1, true);
+        publish_odometer();
+        publish_topic(TOPIC_IP, ip_str, 1, true);
         publish_rssi_id();
-    } else if (ev->event_id == MQTT_EVENT_DISCONNECTED) {
+        publish_data();
+    } else if (event->event_id == MQTT_EVENT_DISCONNECTED) {
         ESP_LOGW(TAG, "MQTT desconectado");
-        xEventGroupClearBits(mqtt_group, 1);
+        xEventGroupClearBits(mqtt_group, 1U);
     }
 }
 
-static void start_mqtt(void) {
-    if (mqtt_client) return;
-    esp_mqtt_client_config_t mqttcfg = {
+static void start_mqtt(void)
+{
+    if (mqtt_client != NULL) {
+        return;
+    }
+
+    esp_mqtt_client_config_t config = {
         .broker = {.address = {.uri = BROKER_URI}},
         .network = {.reconnect_timeout_ms = MQTT_RECONNECT_MS},
         .session = {.last_will = {
@@ -242,107 +309,150 @@ static void start_mqtt(void) {
             .retain = true,
         }},
     };
-    mqtt_client = esp_mqtt_client_init(&mqttcfg);
-    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, mqtt_client);
+
+    mqtt_client = esp_mqtt_client_init(&config);
+    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
+                                   mqtt_event_handler, mqtt_client);
     esp_mqtt_client_start(mqtt_client);
 }
 
-void app_main(void) {
+void app_main(void)
+{
     ESP_LOGI(TAG, "=== VELOCIMETRO MQTT ===");
-    ESP_LOGI(TAG, "GPIO21  %d pulsos/rev  diametro %.1fcm", PULSES_PER_REV, WHEEL_DIAMETER_CM);
+    ESP_LOGI(TAG, "GPIO21 | 3 pulsos/rev | rueda 3.50-10 | diametro %.2f cm",
+             WHEEL_DIAMETER_CM);
+    ESP_LOGI(TAG, "Circunferencia %.3f m | %.3f m/pulso | MQTT cada %d ms",
+             wheel_circumference_m, distance_per_pulse_m, MQTT_INTERVAL_MS);
 
-    nvs_flash_init();
-    nvs_offset = load_nvs();
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    }
+
+    nvs_offset = load_nvs_pulses();
     ESP_LOGI(TAG, "Odometro cargado: %lu pulsos (%.3f km)",
-             nvs_offset, nvs_offset * DIST_PER_PULSE / 1000.0f);
+             (unsigned long)nvs_offset, nvs_offset * distance_per_pulse_m / 1000.0f);
 
-    ota_boot_init();   /* auto-validacion anti-rollback (30 s) */
-
+    ota_boot_init();
     esp_netif_init();
     esp_event_loop_create_default();
-
     mqtt_group = xEventGroupCreate();
 
-    /* Sensor: ISR desde el arranque para no perder pulsos */
     gpio_reset_pin(SENSOR_PIN);
-    gpio_config_t io = {
+    gpio_config_t sensor_config = {
         .intr_type = GPIO_INTR_ANYEDGE,
         .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = (1ULL << SENSOR_PIN),
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
-    gpio_config(&io);
-    /* Estado inicial coherente con el nivel real del pin */
-    pulse_state = (gpio_get_level(SENSOR_PIN) == 1) ? WAITING_FALLING : WAITING_RISING;
-    /* ISR en IRAM: no se pierden pulsos durante escrituras NVS/flash */
-    gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
-    gpio_isr_handler_add(SENSOR_PIN, sensor_isr, NULL);
+    ESP_ERROR_CHECK(gpio_config(&sensor_config));
+
+    const int initial_level = gpio_get_level(SENSOR_PIN);
+    if (initial_level == 0) {
+        sensor_in_low = true;
+        first_low_us = esp_timer_get_time();
+    }
+
+    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(SENSOR_PIN, sensor_isr, NULL));
+
+    /* El LED refleja directamente el nivel del sensor, como en el debug. */
+    gpio_config_t led_config = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << LED_PIN),
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    ESP_ERROR_CHECK(gpio_config(&led_config));
+    gpio_set_level(LED_PIN, initial_level);
+
+    ESP_LOGI(TAG, "Sensor listo. Nivel inicial GPIO21=%d", initial_level);
 
     esp_netif_create_default_wifi_sta();
-    wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&wcfg);
-    /* Antena externa u.FL: GPIO14=HIGH activa el RF switch del XIAO C6 */
+    wifi_init_config_t wifi_init = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&wifi_init));
+
+    /* RF switch de la antena externa u.FL del XIAO C6. */
     gpio_set_direction(GPIO_NUM_14, GPIO_MODE_OUTPUT);
     gpio_set_level(GPIO_NUM_14, 1);
-
-    /* El AP (RPi) esta en la propia moto a <2 m: 10 dBm sobra.
-     * Reduce el pico de corriente, el consumo y el calor. */
     esp_wifi_set_max_tx_power(40);
-    esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL);
-    esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL);
+
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL));
 
     const esp_timer_create_args_t retry_args = {
-        .callback = wifi_retry_cb,
+        .callback = wifi_retry_callback,
         .name = "wifi_retry",
     };
-    esp_timer_create(&retry_args, &wifi_retry_timer);
+    ESP_ERROR_CHECK(esp_timer_create(&retry_args, &wifi_retry_timer));
 
-    wifi_config_t wificfg = {
+    wifi_config_t wifi_config = {
         .sta = {
             .ssid = WIFI_SSID,
             .password = WIFI_PASS,
         },
     };
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_set_config(WIFI_IF_STA, &wificfg);
-    esp_wifi_start();
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
 
-    TimerHandle_t rssi_timer = xTimerCreate("rssi_tmr", pdMS_TO_TICKS(RSSI_INTERVAL_MS), pdTRUE, NULL, rssi_timer_cb);
-    xTimerStart(rssi_timer, 0);
+    TimerHandle_t rssi_timer = xTimerCreate(
+        "rssi_timer", pdMS_TO_TICKS(RSSI_INTERVAL_MS), pdTRUE, NULL,
+        rssi_timer_callback);
+    if (rssi_timer != NULL) {
+        xTimerStart(rssi_timer, 0);
+    }
 
-    ESP_LOGI(TAG, "Sistema iniciado (no bloqueante) - contando pulsos desde ya");
+    ESP_LOGI(TAG, "Sistema iniciado; odometro persistente y OTA activos");
 
-    while (1) {
-        if (pulse_ready) {
+    TickType_t last_mqtt = xTaskGetTickCount();
+    TickType_t last_debug = last_mqtt;
+
+    while (true) {
+        const int pin_level = gpio_get_level(SENSOR_PIN);
+        gpio_set_level(LED_PIN, pin_level);
+
+        bool pulse_event = pulse_ready;
+        if (pulse_event) {
             pulse_ready = false;
             stopped_saved = false;
-
-            uint32_t cur = pulse_count;
-            if ((cur - last_saved) >= NVS_SAVE_PULSES) {
-                save_nvs(nvs_offset + cur);
-                last_saved = cur;
-            }
+            ESP_LOGI(TAG, "PULSO total=%lu velocidad=%.1f km/h",
+                     (unsigned long)total_pulses(), current_speed_kmh());
         }
 
-        /* Guardado unico al detectar detencion (sin spam de log/NVS) */
-        if (!stopped_saved) {
-            int64_t since_ms = (esp_timer_get_time() - last_pulse_us) / 1000;
-            if (since_ms >= SPEED_TIMEOUT_MS) {
-                save_nvs(nvs_offset + pulse_count);
-                last_saved = pulse_count;
-                stopped_saved = true;
-                ESP_LOGI(TAG, "DETENIDO - odometro guardado");
-            }
+        const int64_t last = last_pulse_us;
+        if (!stopped_saved && last > 0 &&
+            (esp_timer_get_time() - last) >= SPEED_TIMEOUT_MS * 1000LL) {
+            save_nvs_pulses(total_pulses());
+            last_saved_pulses = pulse_count;
+            stopped_saved = true;
         }
 
-        static uint32_t last_mqtt = 0;
-        uint32_t now = xTaskGetTickCount();
-        if ((now - last_mqtt) >= pdMS_TO_TICKS(MQTT_INTERVAL_MS)) {
+        const uint32_t current = pulse_count;
+        if ((current - last_saved_pulses) >= NVS_SAVE_PULSES) {
+            save_nvs_pulses(total_pulses());
+            last_saved_pulses = current;
+        }
+
+        const TickType_t now = xTaskGetTickCount();
+        if (pulse_event || (now - last_mqtt) >= pdMS_TO_TICKS(MQTT_INTERVAL_MS)) {
             last_mqtt = now;
-            publish_data();   /* se auto-suprime si MQTT esta caido */
+            publish_data();
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        if ((now - last_debug) >= pdMS_TO_TICKS(2000)) {
+            last_debug = now;
+            char debug[80];
+            snprintf(debug, sizeof(debug), "{\"pin\":%d,\"pulses\":%lu}",
+                     pin_level, (unsigned long)total_pulses());
+            publish_topic(TOPIC_DEBUG, debug, 0, false);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
