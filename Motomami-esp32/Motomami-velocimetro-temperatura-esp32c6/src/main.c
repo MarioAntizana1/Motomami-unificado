@@ -77,7 +77,8 @@ static char ip_str[16] = {0};
 static volatile uint32_t pulse_count = 0;
 static volatile bool pulse_ready = false;
 static int64_t last_pulse_us = 0;
-static uint32_t pulse_period_us = 0;
+/* int64_t es necesario: a mano puede haber mas de 4.29 s entre pulsos. */
+static int64_t pulse_period_us = 0;
 
 typedef enum {
     SENSOR_HIGH_STABLE,
@@ -152,13 +153,13 @@ static void sample_sensor(int level, int64_t now)
             const int64_t gap = pulse_at - last_pulse_us;
 
             if (last_pulse_us == 0 || gap >= MIN_PULSE_GAP_US) {
-                if (last_pulse_us > 0 && gap <= UINT32_MAX) {
-                    const uint32_t sample_period = (uint32_t)gap;
+                if (last_pulse_us > 0) {
+                    const int64_t sample_period = gap;
                     if (pulse_period_us == 0) {
                         pulse_period_us = sample_period;
                     } else {
                         /* Media movil simple: reduce saltos de velocidad. */
-                        pulse_period_us = (pulse_period_us * 3U + sample_period) / 4U;
+                        pulse_period_us = (pulse_period_us * 3LL + sample_period) / 4LL;
                     }
                 }
                 last_pulse_us = pulse_at;
@@ -217,7 +218,7 @@ static void publish_topic(const char *topic, const char *payload, int qos, bool 
 static float current_speed_kmh(void)
 {
     const int64_t last = last_pulse_us;
-    const uint32_t period = pulse_period_us;
+    const int64_t period = pulse_period_us;
 
     if (last == 0 || period == 0) {
         return 0.0f;
@@ -228,7 +229,7 @@ static float current_speed_kmh(void)
         return 0.0f;
     }
 
-    const int64_t effective_period = elapsed > (int64_t)period ? elapsed : period;
+    const int64_t effective_period = elapsed > period ? elapsed : period;
     return (distance_per_pulse_m * 3600000000.0f) / (float)effective_period;
 }
 
@@ -241,10 +242,10 @@ static void publish_data(void)
     char payload[160];
 
     snprintf(payload, sizeof(payload),
-             "{\"id\":%lu,\"s\":%.1f,\"d\":%.3f,\"m\":%.1f,\"o\":%.3f,\"p\":%lu,\"dt\":%lu}",
+             "{\"id\":%lu,\"s\":%.1f,\"d\":%.3f,\"m\":%.1f,\"o\":%.3f,\"p\":%lu,\"dt\":%llu}",
              (unsigned long)++message_id, speed, kilometers, meters,
              kilometers, (unsigned long)total,
-             (unsigned long)(pulse_period_us / 1000U));
+             (unsigned long long)(pulse_period_us / 1000LL));
     publish_topic(TOPIC_DATA, payload, 0, false);
 }
 
