@@ -22,6 +22,7 @@ Puertos típicos del SIM7600-G:
 import time
 import threading
 import re
+import copy
 import serial
 import serial.tools.list_ports
 from typing import Optional, Callable
@@ -130,6 +131,7 @@ class SIM7600GPS:
         # Para reconexión
         self.consecutive_errors = 0
         self.max_errors = 5
+        self._last_satellite_request = 0.0
 
     def set_callback(self, callback: Callable):
         """Callback llamado con cada actualización de datos GPS"""
@@ -167,7 +169,7 @@ class SIM7600GPS:
     def get_data(self) -> SIM7600GPSData:
         """Obtiene los últimos datos GPS (thread-safe)"""
         with self.lock:
-            return self.data
+            return copy.copy(self.data)
 
     def _run(self):
         """Bucle principal: conecta, activa GPS, lee datos"""
@@ -285,20 +287,21 @@ class SIM7600GPS:
             try:
                 now = time.time()
 
-                # Cada segundo pedir CGPSINFO (actualiza posicion + alt + vel + rumbo)
-                if now - last_info_time >= 1.0:
+                # NMEA alimenta el estado continuamente; CGPSINFO queda como
+                # respaldo AT cada 2 s para no bloquear la lectura.
+                if now - last_info_time >= 2.0:
                     self._request_gps_info()
                     last_info_time = now
 
                 # Leer NMEA del puerto (satelites + datos de respaldo)
                 self._read_nmea()
 
-                # Callback cada ~0.4s con datos combinados
-                if self._callback and now - last_cb_time >= 0.4:
+                # Callback rapido para la interfaz y el tracker de distancia.
+                if self._callback and now - last_cb_time >= 0.2:
                     self._callback(self.data)
                     last_cb_time = now
 
-                time.sleep(0.05)
+                time.sleep(0.02)
 
             except serial.SerialException:
                 print("[SIM7600-GPS] Puerto cerrado inesperadamente")
@@ -322,7 +325,7 @@ class SIM7600GPS:
             self.serial.flush()
 
             # Leer respuesta
-            time.sleep(0.3)  # Esperar respuesta
+            time.sleep(0.05)  # El bucle termina al recibir OK o ERROR.
             response = b""
             end_time = time.time() + timeout
 
@@ -394,8 +397,10 @@ class SIM7600GPS:
                     self.data.has_fix = True
                     self.data.received_at = time.time()
 
-                # También pedir número de satélites
-                self._request_satellites()
+                # NMEA/GSV ya entrega satelites; AT queda como respaldo lento.
+                if time.monotonic() - self._last_satellite_request >= 10.0:
+                    self._request_satellites()
+                    self._last_satellite_request = time.monotonic()
 
                 lat_dd, lon_dd = self.data.get_coordinates_decimal()
                 print(f"[SIM7600-GPS] Posicion: {lat_dd:.6f}, {lon_dd:.6f} | "
@@ -500,7 +505,8 @@ class SIM7600GPS:
         if len(parts) >= 4:
             try:
                 sats_in_view = int(parts[3]) if parts[3] else 0
-                self.data.num_satellites = max(self.data.num_satellites, sats_in_view)
+                with self.lock:
+                    self.data.num_satellites = max(self.data.num_satellites, sats_in_view)
             except (ValueError, IndexError):
                 pass
 

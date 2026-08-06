@@ -17,6 +17,7 @@ if _SRC not in sys.path:
 
 import config_loader
 from libs.fb_display import FbDisplay, _find_font, _get_fb1, _get_fb2
+from libs.media_sources import discover_media_sources
 
 VIDEO_EXT = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v')
 VOLUME_STEP = 5
@@ -38,7 +39,8 @@ class FileBrowser:
         self.selected = 0
         self.playing_idx = -1
         self.scroll = 0
-        self.current_folder = self._find_root()
+        self.sources = discover_media_sources(config_loader.MOVIES_DIR, "VIDEO")
+        self.current_folder = None
         self._hist = []
         self.refresh()
 
@@ -52,6 +54,14 @@ class FileBrowser:
         self.files = []
         self.names = []
         self.is_dir = []
+        if self.current_folder is None:
+            for source in self.sources:
+                self.files.append(source.path)
+                self.names.append(f"[FUENTE] {source.label}")
+                self.is_dir.append(True)
+            self.selected = 0
+            self.scroll = 0
+            return
         if not os.path.isdir(self.current_folder):
             return
         dirs = []
@@ -129,6 +139,8 @@ class FileBrowser:
         return True
 
     def current_path_display(self):
+        if self.current_folder is None:
+            return "FUENTES DE VIDEO"
         p = self.current_folder
         for f in SEARCH_FOLDERS:
             if p.startswith(f):
@@ -168,9 +180,9 @@ class VideoPlayer:
                 ['ffmpeg', '-v', 'error', '-re',
                  '-i', filepath,
                  '-r', '10',
+                 '-vf', 'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2:black',
                  '-f', 'rawvideo',
                  '-pix_fmt', 'rgb24',
-                 '-s', f'{self._frame_w}x{self._frame_h}',
                  '-an', '-sn', '-'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 bufsize=2048 * 2048,

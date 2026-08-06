@@ -21,6 +21,7 @@ nmea_port = /dev/ttyUSB1
 baud = 115200
 map_zoom = 16
 max_route_points = 50
+distance_file = /home/motomami/moto/data/gps_distance.json
 
 [paths]
 music_dir = /home/motomami/music
@@ -31,11 +32,16 @@ fb1 = /dev/fb1
 fb2 = /dev/fb2
 width = 320
 height = 240
+mode = dual
+hdmi_fb = /dev/fb0
+hdmi_width = 1280
+hdmi_height = 800
 
 [system]
 telemetry_interval = 5
 gps_refresh_interval = 2
 map_tile_cache = /tmp/maptiles
+startup_app = gps
 
 [ui]
 # Tema de la interfaz: night (oscuro, default) o day (claro, para sol directo)

@@ -115,7 +115,10 @@ class GPSDisplayApp:
                     self._route_points = self._route_points[-MAX_ROUTE_PTS:]
 
         img_map  = self._render_map(gps, lat, lon, using_cache)
-        img_data = self._render_data(gps, using_cache)
+        velo = self._state.get_esp32_velocimetro() if self._state else None
+        dire = self._state.get_esp32_direccionales() if self._state else None
+        inp = self._state.get_esp32_input() if self._state else None
+        img_data = self._render_data(gps, using_cache, velo, dire, inp)
 
         full = self._fb.image()
         full.paste(img_map,  (0,   0))
@@ -168,7 +171,7 @@ class GPSDisplayApp:
         draw.text(((W - tw) // 2, cy + 45), text, font=self._f_normal, fill=C_YELLOW)
         return img
 
-    def _render_data(self, gps, using_cache) -> Image.Image:
+    def _render_data(self, gps, using_cache, velo=None, dire=None, inp=None) -> Image.Image:
         W, H = 320, 240
         img = Image.new("RGB", (W, H), C_BG)
         draw = ImageDraw.Draw(img)
@@ -232,24 +235,41 @@ class GPSDisplayApp:
         sats_col = C_GREEN if gps.num_satellites >= 4 else C_YELLOW
         draw.text((rx, y + 14), str(gps.num_satellites), font=self._f_big, fill=sats_col)
 
-        # ── Barra inferior: sistema + caché tiles ──
+        # ── MQTT + distancias independientes ──
+        wheel_online = velo is not None and velo.online
+        wheel_speed = velo.speed if velo is not None else 0.0
+        wheel_odo = velo.odometro if velo is not None else 0.0
+        wheel_m = velo.distance_m if velo is not None else 0.0
+        gps_trip_km = gps.gps_trip_distance_m / 1000.0
+        gps_total_km = gps.gps_total_distance_m / 1000.0
+        draw.text((10, 160), f"RUEDA {wheel_speed:.1f} km/h", font=self._f_small,
+                  fill=C_GREEN if wheel_online else C_DIM)
+        draw.text((10, 176), f"RUEDA {wheel_m:.0f} m  ODO {wheel_odo:.2f} km",
+                  font=self._f_small, fill=C_BLUE if wheel_online else C_DIM)
+        draw.text((175, 160), f"GPS DIST {gps_trip_km:.2f} km", font=self._f_small, fill=C_BLUE)
+        draw.text((175, 176), f"GPS TOTAL {gps_total_km:.2f} km", font=self._f_small, fill=C_BLUE)
+
+        # ── Barra inferior: MQTT, señales y sistema ──
         yb = H - 50
         draw.rectangle([0, yb, W - 1, H - 1], fill=(15, 15, 20))
         cs = _tile_cache_stats()
         cache_pct = (cs["hits"] / (cs["hits"] + cs["misses"]) * 100) if (cs["hits"] + cs["misses"]) > 0 else 100
-        draw.text((10, yb + 4), f"CACHE {cache_pct:.0f}% ({cs['hits']}) DL:{cs['downloads']}", font=self._f_small, fill=C_GREEN if cache_pct > 80 else C_YELLOW)
+        mqtt_ok = velo is not None and velo.online and (time.time() - velo.last_update) < 5.0
+        left = bool(dire and dire.intermitente_izq)
+        right = bool(dire and dire.intermitente_der)
+        brake = bool(dire and dire.frenado) or bool(inp and inp.brake)
+        night = bool(dire and dire.luz_nocturna) or bool(inp and inp.night)
+        signal_line = f"MQTT:{'OK' if mqtt_ok else 'OFF'} L:{int(left)} R:{int(right)} F:{int(brake)} N:{int(night)}"
+        draw.text((5, yb + 2), signal_line, font=self._f_small, fill=C_GREEN if mqtt_ok else C_RED)
+        draw.text((5, yb + 17), f"CACHE {cache_pct:.0f}%  CPU/RAM", font=self._f_small, fill=C_GREEN if cache_pct > 80 else C_YELLOW)
         if self._state:
             m = self._state.get_metrics()
             cpu, ram, temp = m.cpu_percent, m.ram_percent, m.cpu_temp
             cpu_c = C_GREEN if cpu < 50 else (C_YELLOW if cpu < 80 else C_RED)
-            draw.text((10, yb + 18), f"CPU", font=self._f_small, fill=cpu_c)
-            draw.rectangle([40, yb + 19, 100, yb + 27], fill=(30, 30, 30))
-            draw.rectangle([40, yb + 19, 40 + int(60 * cpu / 100), yb + 27], fill=cpu_c)
-            draw.text((105, yb + 18), f"{cpu:.0f}%", font=self._f_small, fill=cpu_c)
-            draw.text((145, yb + 18), f"RAM {ram:.0f}%", font=self._f_small, fill=C_BLUE)
+            draw.text((150, yb + 17), f"{cpu:.0f}%/{ram:.0f}%", font=self._f_small, fill=cpu_c)
             if temp > 0:
                 tc = C_GREEN if temp < 55 else (C_YELLOW if temp < 70 else C_RED)
-                draw.text((10, yb + 32), f"TEMP:{temp:.0f}°C", font=self._f_small, fill=tc)
+                draw.text((245, yb + 17), f"{temp:.0f}C", font=self._f_small, fill=tc)
 
         return img
 

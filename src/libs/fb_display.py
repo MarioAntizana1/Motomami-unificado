@@ -17,10 +17,14 @@ except ImportError:
 # ── Rutas config ──
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
-    from config_loader import FB1_PATH, FB2_PATH, DISP_W, DISP_H
+    from config_loader import (
+        FB1_PATH, FB2_PATH, DISP_W, DISP_H, DISPLAY_MODE,
+        HDMI_FB_PATH, HDMI_W, HDMI_H,
+    )
 except ImportError:
     FB1_PATH, FB2_PATH = "/dev/fb1", "/dev/fb2"
     DISP_W, DISP_H = 320, 240
+    DISPLAY_MODE, HDMI_FB_PATH, HDMI_W, HDMI_H = "dual", "/dev/fb0", 1280, 800
 
 _FONT_PATHS = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -44,6 +48,13 @@ def _sysfs(fb_name, attr):
         return f.read().strip()
 
 
+def _sysfs_int(fb_name, attr, fallback):
+    try:
+        return int(_sysfs(fb_name, attr))
+    except (OSError, ValueError):
+        return fallback
+
+
 class FramebufferDisplay:
     """Acceso directo a un framebuffer (/dev/fbX) via mmap."""
 
@@ -59,40 +70,93 @@ class FramebufferDisplay:
             self.width, self.height, self.bpp = DISP_W, DISP_H, 16
 
         self.Bpp = self.bpp // 8
-        self.buf_size = self.width * self.height * self.Bpp
+        self.stride = _sysfs_int(fn, "stride", self.width * self.Bpp)
+        self.buf_size = self.stride * self.height
+        self._aspect_fit = DISPLAY_MODE == "hdmi" and self.fb_path == HDMI_FB_PATH
         self._fd = os.open(self.fb_path, os.O_RDWR)
         self._mmap = mmap.mmap(
             self._fd, self.buf_size, mmap.MAP_SHARED,
             mmap.PROT_READ | mmap.PROT_WRITE
         )
 
-    def _to_rgb565(self, img: Image.Image) -> bytes:
+    def _row_pad(self, data: bytes, row_bytes: int) -> bytes:
+        if self.stride == row_bytes:
+            return data
+        rows = []
+        for y in range(self.height):
+            row = data[y * row_bytes:(y + 1) * row_bytes]
+            rows.append(row + b"\x00" * max(0, self.stride - row_bytes))
+        return b"".join(rows)
+
+    def _to_native(self, img: Image.Image) -> bytes:
         if img.size != (self.width, self.height):
             img = img.resize((self.width, self.height))
         if img.mode != "RGB":
             img = img.convert("RGB")
+
         if _HAS_NUMPY:
             a = np.asarray(img, dtype=np.uint16)
-            rgb565 = ((a[:, :, 0] >> 3) << 11) | ((a[:, :, 1] >> 2) << 5) | (a[:, :, 2] >> 3)
-            return rgb565.astype("<u2").tobytes()
-        # Fallback puro Python (lento)
-        out = bytearray(self.buf_size)
+            if self.bpp == 16:
+                rgb565 = ((a[:, :, 0] >> 3) << 11) | ((a[:, :, 1] >> 2) << 5) | (a[:, :, 2] >> 3)
+                return self._row_pad(rgb565.astype("<u2").tobytes(), self.width * 2)
+            rgb = a.astype(np.uint8)
+            if self.bpp == 32:
+                # XRGB8888 en little-endian framebuffer: B,G,R,X.
+                native = np.empty((self.height, self.width, 4), dtype=np.uint8)
+                native[:, :, 0] = rgb[:, :, 2]
+                native[:, :, 1] = rgb[:, :, 1]
+                native[:, :, 2] = rgb[:, :, 0]
+                native[:, :, 3] = 0
+                return self._row_pad(native.tobytes(), self.width * 4)
+            if self.bpp == 24:
+                return self._row_pad(rgb.tobytes(), self.width * 3)
+
+        # Fallback puro Python (RGB565 o framebuffer no estandar).
+        if self.bpp == 16:
+            out = bytearray(self.width * self.height * 2)
+        elif self.bpp == 32:
+            out = bytearray(self.width * self.height * 4)
+        else:
+            out = bytearray(self.width * self.height * 3)
         px = img.load()
         i = 0
         for y in range(self.height):
             for x in range(self.width):
                 r, g, b = px[x, y]
-                v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
-                out[i] = v & 0xFF
-                out[i + 1] = (v >> 8) & 0xFF
-                i += 2
-        return bytes(out)
+                if self.bpp == 16:
+                    v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+                    out[i:i + 2] = v.to_bytes(2, "little")
+                    i += 2
+                elif self.bpp == 32:
+                    out[i:i + 4] = bytes((b, g, r, 0))
+                    i += 4
+                else:
+                    out[i:i + 3] = bytes((r, g, b))
+                    i += 3
+        return self._row_pad(bytes(out), self.width * self.Bpp)
+
+    def _write(self, img: Image.Image):
+        data = self._to_native(img)
+        self._mmap.seek(0)
+        self._mmap.write(data)
+
+    def show_aspect_fit(self, img: Image.Image):
+        """Dibuja centrado sin deformar, usado por el framebuffer HDMI."""
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        scale = min(self.width / img.width, self.height / img.height)
+        size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
+        fitted = img.resize(size, Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", (self.width, self.height), (0, 0, 0))
+        canvas.paste(fitted, ((self.width - size[0]) // 2, (self.height - size[1]) // 2))
+        self._write(canvas)
 
     def show(self, img: Image.Image):
         """Envía imagen PIL al framebuffer."""
-        data = self._to_rgb565(img)
-        self._mmap.seek(0)
-        self._mmap.write(data)
+        if self._aspect_fit:
+            self.show_aspect_fit(img)
+        else:
+            self._write(img)
 
     def blank(self):
         """Apaga la pantalla (pone todo en negro)."""
@@ -108,6 +172,7 @@ class FramebufferDisplay:
 # ── Instancias globales (singleton por proceso) ──
 _d1: FramebufferDisplay = None
 _d2: FramebufferDisplay = None
+_hdmi: FramebufferDisplay = None
 
 
 def _get_fb1() -> FramebufferDisplay:
@@ -122,6 +187,13 @@ def _get_fb2() -> FramebufferDisplay:
     if _d2 is None:
         _d2 = FramebufferDisplay(FB2_PATH)
     return _d2
+
+
+def _get_hdmi() -> FramebufferDisplay:
+    global _hdmi
+    if _hdmi is None:
+        _hdmi = FramebufferDisplay(HDMI_FB_PATH)
+    return _hdmi
 
 
 # ── Compatibilidad con código existente ──
@@ -162,7 +234,9 @@ class FbDisplay:
         return self._img
 
     def update(self):
-        if self.id == 3:
+        if DISPLAY_MODE == "hdmi":
+            _get_hdmi().show(self._img)
+        elif self.id == 3:
             _get_fb1().show(self._img.crop((0, 0, W, H)))
             _get_fb2().show(self._img.crop((W, 0, W * 2, H)))
         elif self.id == 1:

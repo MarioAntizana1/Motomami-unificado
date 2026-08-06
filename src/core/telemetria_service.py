@@ -118,6 +118,20 @@ class TelemetriaService(threading.Thread):
             "satellites": gps.num_satellites,
             "gps_fix": 1 if gps.has_fix else 0,
             "gps_cached": 0 if (gps.has_fix and gps.lat != 0.0) else (1 if gps.cached_has_fix else 0),
+            "gps_trip_distance_m": gps.gps_trip_distance_m,
+            "gps_total_distance_m": gps.gps_total_distance_m,
+        }
+
+    def _collect_wheel(self) -> dict:
+        if self._state is None:
+            return {}
+        wheel = self._state.get_esp32_velocimetro()
+        return {
+            "wheel_speed_kmh": wheel.speed,
+            "wheel_distance_m": wheel.distance_m,
+            "wheel_odometer_km": wheel.odometro,
+            "wheel_pulses": wheel.pulses,
+            "wheel_mqtt_online": 1 if wheel.online else 0,
         }
 
     # ── Publicación ──
@@ -126,6 +140,7 @@ class TelemetriaService(threading.Thread):
         payload = {}
         payload.update(self._collect_system())
         payload.update(self._collect_gps())
+        payload.update(self._collect_wheel())
         if extra:
             payload.update(extra)
 

@@ -88,12 +88,18 @@ class MotoMamiSystem:
 
     def run(self):
         self.start_services()
+        first_app = config_loader.STARTUP_APP if config_loader.STARTUP_APP not in ("menu", "") else None
         
         try:
             while self.running:
-                menu = MainMenu(self.input_mgr, self.state)
-                print("[Main] Lanzando UI principal...")
-                app_key = menu.run()
+                if first_app:
+                    app_key = first_app
+                    first_app = None
+                    print(f"[Main] Lanzando app inicial: {app_key}")
+                else:
+                    menu = MainMenu(self.input_mgr, self.state)
+                    print("[Main] Lanzando UI principal...")
+                    app_key = menu.run()
                 
                 if app_key == "gps":
                     print("[Main] Lanzando GPS App")

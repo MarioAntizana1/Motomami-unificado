@@ -8,7 +8,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config_loader import GPS_AT_PORT, GPS_NMEA_PORT, GPS_BAUD
+from config_loader import GPS_AT_PORT, GPS_NMEA_PORT, GPS_BAUD, GPS_DISTANCE_FILE
+from core.gps_distance import GPSDistanceTracker
 
 # Intentar importar el driver real; si no, usar stub
 _DRIVERS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "drivers")
@@ -36,6 +37,12 @@ class GPSService(threading.Thread):
         self._stop_event = threading.Event()
         self._gps = None
         self._connected = False
+        self._distance = GPSDistanceTracker(GPS_DISTANCE_FILE)
+        if self._state:
+            self._state.update_gps_distance(
+                self._distance.trip_distance_m,
+                self._distance.total_distance_m,
+            )
 
     def run(self):
         print(f"[GPSService] Iniciando en {GPS_AT_PORT}")
@@ -73,6 +80,8 @@ class GPSService(threading.Thread):
         """Callback del driver GPS. Actualiza SystemState."""
         if self._state:
             self._state.update_gps(data)
+            trip_m, total_m = self._distance.update(data)
+            self._state.update_gps_distance(trip_m, total_m)
 
     def _run_stub(self):
         """Datos simulados cuando no hay driver (para testing)."""

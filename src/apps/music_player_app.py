@@ -15,6 +15,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from libs.fb_display import FbDisplay, _find_font
+from libs.media_sources import discover_media_sources
 import config_loader
 
 AUDIO_EXT = ('.mp3', '.wav', '.flac', '.ogg')
@@ -28,8 +29,9 @@ class MusicBrowser:
         self.selected = 0
         self.playing_idx = -1
         self.scroll = 0
+        self.sources = discover_media_sources(root_dir, "MUSICA")
         self.root_folder = root_dir
-        self.current_folder = root_dir
+        self.current_folder = None
         self._hist = []
         self.refresh()
 
@@ -37,6 +39,14 @@ class MusicBrowser:
         self.files = []
         self.names = []
         self.is_dir = []
+        if self.current_folder is None:
+            for source in self.sources:
+                self.files.append(source.path)
+                self.names.append(f"[FUENTE] {source.label}")
+                self.is_dir.append(True)
+            self.selected = 0
+            self.scroll = 0
+            return
         if not os.path.isdir(self.current_folder):
             return
         dirs = []
@@ -119,6 +129,8 @@ class MusicBrowser:
         return True
 
     def current_path_display(self):
+        if self.current_folder is None:
+            return "FUENTES DE MUSICA"
         p = self.current_folder
         if p.startswith(self.root_folder):
             rel = p[len(self.root_folder):]

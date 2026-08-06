@@ -21,6 +21,8 @@ class GPSState:
     gps_time: str = ""
     gps_date: str = ""
     last_update: float = 0.0
+    gps_trip_distance_m: float = 0.0
+    gps_total_distance_m: float = 0.0
 
     # Caché: última posición válida conocida (nunca se borra)
     cached_lat: float = 0.0
@@ -66,6 +68,10 @@ class GPSState:
     def is_stale(self, max_age_s: float = 10.0) -> bool:
         """True si los datos tienen más de max_age_s segundos."""
         return (time.time() - self.last_update) > max_age_s
+
+    def update_distance(self, trip_m: float, total_m: float):
+        self.gps_trip_distance_m = max(0.0, float(trip_m))
+        self.gps_total_distance_m = max(0.0, float(total_m))
 
 
 @dataclass
@@ -173,6 +179,10 @@ class SystemState:
     def update_gps(self, data):
         with self._gps_lock:
             self.gps.update_from_driver(data)
+
+    def update_gps_distance(self, trip_m: float, total_m: float):
+        with self._gps_lock:
+            self.gps.update_distance(trip_m, total_m)
 
     def get_gps(self) -> GPSState:
         with self._gps_lock:
