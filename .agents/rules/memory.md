@@ -325,3 +325,15 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - El periodo de velocidad usa media movil simple 3/4 para reducir saltos; el payload agrega `dt` en milisegundos.
 - Monitor visual actualizado con tarjetas de velocidad, recorrido en m/km, odometro, pulsos, sensor, RSSI, IP e ID; colores derivados del tema para mejor contraste en modo dia.
 - Verificacion MQTT en RPi: `status online`, `ip 192.168.42.17`, RSSI y payload `s/d/m/o/p` recibidos.
+
+### Continuacion: baja velocidad, GPS y HDMI
+
+- Bug de baja velocidad: `pulse_period_us` paso de `uint32_t` a `int64_t`; a mano el intervalo puede superar 4.29 s y antes se conservaba un periodo viejo, produciendo km/h enormes.
+- `GPSDistanceTracker` nuevo: Haversine, filtro de duplicados/saltos, distancia de viaje y total persistente en JSON atomico.
+- `GPSState` y ThingsBoard ahora separan `gps_trip_distance_m`/`gps_total_distance_m` de `wheel_distance_m`/`wheel_odometer_km`.
+- GPSDisplay integra velocidad GPS, velocidad Hall, distancias, odometro y estados MQTT de luces/freno/nocturna.
+- SIM7600: callback 0.2 s, CGPSINFO cada 2 s, satelites AT cada 10 s, espera AT inicial reducida y copia thread-safe de datos.
+- `FbDisplay` tiene backend HDMI aspect-fit con RGB565/32-bit y stride; en `1280x800`, el canvas logico `640x240` queda en `1280x480` centrado sin deformar.
+- Musica/video descubren fuentes locales y USB montadas; video conserva aspect ratio y compone en un canvas unico en HDMI.
+- `startup_app=gps` permite iniciar directamente en GPS; se puede cambiar a `menu` en `config.ini`.
+- RPi/AP se cayo repetidamente por bateria/inestabilidad; no se desplego este ultimo commit al hardware mientras `Motomami-net` no permanezca estable.

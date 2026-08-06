@@ -150,7 +150,7 @@ class FileBrowser:
 
 
 class VideoPlayer:
-    def __init__(self):
+    def __init__(self, frame_sink=None):
         self.ffmpeg_proc = None
         self.ffplay_proc = None
         self.is_playing = False
@@ -161,6 +161,7 @@ class VideoPlayer:
         self.volume = 80
         self._running = False
         self._thread = None
+        self._frame_sink = frame_sink
         self._frame_w = 320
         self._frame_h = 240
         self.target_fps = 10
@@ -232,7 +233,7 @@ class VideoPlayer:
         frame_n = 0
         time.sleep(0.5)
         t0 = time.time()
-        fb1 = _get_fb1()
+        fb1 = _get_fb1() if self._frame_sink is None else None
         try:
             while self._running and proc.poll() is None:
                 if self.is_paused:
@@ -243,7 +244,10 @@ class VideoPlayer:
                     break
                 try:
                     img = Image.frombuffer('RGB', (self._frame_w, self._frame_h), raw, 'raw', 'RGB', 0, 1)
-                    fb1.show(img)
+                    if self._frame_sink:
+                        self._frame_sink(img)
+                    else:
+                        fb1.show(img)
                 except Exception:
                     pass
                 frame_n += 1
@@ -320,8 +324,10 @@ class VideoPlayerApp:
         self._state = state
         self._fb = FbDisplay(3)
         self._running = False
+        self._render_lock = threading.Lock()
+        self._last_video_frame = Image.new("RGB", (320, 240), (0, 0, 0))
         self.browser = FileBrowser()
-        self.player = VideoPlayer()
+        self.player = VideoPlayer(frame_sink=self._on_video_frame)
         self.mode = 'browser'
         self.last_upd = 0
 
@@ -365,7 +371,8 @@ class VideoPlayerApp:
                 else:
                     path = self.browser.get_selected_path()
                     if path and os.path.exists(path):
-                        _get_fb2().show(Image.new("RGB", (320, 240), (0, 0, 0)))
+                        if config_loader.DISPLAY_MODE != "hdmi":
+                            _get_fb2().show(Image.new("RGB", (320, 240), (0, 0, 0)))
                         self.player.play(path)
                         self.browser.set_playing(self.browser.selected)
                         self.mode = 'playing'
@@ -443,7 +450,6 @@ class VideoPlayerApp:
         self._fb.update()
 
     def _render_playing_info(self):
-        fb2 = _get_fb2()
         img = Image.new("RGB", (320, 240), (0, 0, 0))
         draw = ImageDraw.Draw(img)
         ft = _find_font(14)
@@ -473,4 +479,19 @@ class VideoPlayerApp:
             draw.text((7, 90 + i * 14), t, font=fs, fill=(100, 100, 120))
 
         draw.rectangle([(1, 1), (318, 238)], outline=(0, 150, 80), width=1)
-        fb2.show(img)
+        if config_loader.DISPLAY_MODE == "hdmi":
+            with self._render_lock:
+                self._fb.blank()
+                self._fb.image().paste(self._last_video_frame, (0, 0))
+                self._fb.image().paste(img, (320, 0))
+                self._fb.update()
+        else:
+            _get_fb2().show(img)
+
+    def _on_video_frame(self, img):
+        """Recibe frames sin escribir un framebuffer equivocado en HDMI."""
+        if config_loader.DISPLAY_MODE != "hdmi":
+            _get_fb1().show(img)
+            return
+        self._last_video_frame = img.copy()
+        self._render_playing_info()
