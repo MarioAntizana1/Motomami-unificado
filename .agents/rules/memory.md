@@ -336,4 +336,4 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - `FbDisplay` tiene backend HDMI aspect-fit con RGB565/32-bit y stride; en `1280x800`, el canvas logico `640x240` queda en `1280x480` centrado sin deformar.
 - Musica/video descubren fuentes locales y USB montadas; video conserva aspect ratio y compone en un canvas unico en HDMI.
 - `startup_app=gps` permite iniciar directamente en GPS; se puede cambiar a `menu` en `config.ini`.
-- RPi/AP se cayo repetidamente por bateria/inestabilidad; no se desplego este ultimo commit al hardware mientras `Motomami-net` no permanezca estable.
+- RPi/AP se cayo repetidamente por bateria/inestabilidad. Tras volver, se desplego `932dd8a`, se configuro `display.mode=hdmi`/`startup_app=gps`, y se subio por OTA el firmware `4518ed0` con el fix de baja velocidad.
