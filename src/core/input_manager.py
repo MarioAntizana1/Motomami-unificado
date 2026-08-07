@@ -41,6 +41,8 @@ class InputManager(threading.Thread):
         self._stop_event = threading.Event()
         self._btns = {}
         self._btn_prev = {}
+        self._btn_candidate = {}
+        self._btn_candidate_since = {}
         self._xbox = None
 
         # Intentar Xbox
@@ -60,8 +62,11 @@ class InputManager(threading.Thread):
                 btn = digitalio.DigitalInOut(pin)
                 btn.direction = digitalio.Direction.INPUT
                 btn.pull = digitalio.Pull.DOWN
+                current = bool(btn.value)
                 self._btns[name] = btn
-                self._btn_prev[name] = False
+                self._btn_prev[name] = current
+                self._btn_candidate[name] = current
+                self._btn_candidate_since[name] = time.monotonic()
             except Exception as e:
                 print(f"[Input] GPIO{gpio_num} ({name}): {e}")
 
@@ -109,14 +114,27 @@ class InputManager(threading.Thread):
 
         while not self._stop_event.is_set():
             # ── Leer GPIO ──
+            now = time.monotonic()
             for name, btn in self._btns.items():
                 try:
-                    cur = btn.value
+                    cur = bool(btn.value)
                 except Exception:
                     cur = False
-                if cur and not self._btn_prev.get(name, False):
-                    self._push(name, "gpio")
-                self._btn_prev[name] = cur
+
+                stable = self._btn_prev.get(name, False)
+                candidate = self._btn_candidate.get(name, stable)
+                if cur == stable:
+                    self._btn_candidate[name] = cur
+                    self._btn_candidate_since[name] = now
+                    continue
+                if cur != candidate:
+                    self._btn_candidate[name] = cur
+                    self._btn_candidate_since[name] = now
+                    continue
+                if now - self._btn_candidate_since.get(name, now) >= 0.04:
+                    self._btn_prev[name] = cur
+                    if cur:
+                        self._push(name, "gpio")
 
             # ── Xbox: hot-plug / reconexión ──
             if self._xbox is None or not self._xbox.connected:

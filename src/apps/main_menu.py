@@ -35,7 +35,8 @@ class MainMenu:
         self._state = state
         self._idx = 0
         self._scroll = 0
-        self._fb = FbDisplay(3)
+        # El menu queda siempre en las dos pantallas pequenas, incluso con HDMI.
+        self._fb = FbDisplay(3, output="dual")
 
         self._f_icon = _find_font(22)
         self._ft = _find_font(16)

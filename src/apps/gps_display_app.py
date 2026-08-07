@@ -18,7 +18,7 @@ for _p in [_SRC, os.path.join(_SRC, 'libs'), os.path.join(_SRC, 'core'),
 
 from PIL import Image, ImageDraw, ImageFont
 from libs.fb_display import FbDisplay, _find_font
-from config_loader import MAP_ZOOM, GPS_REFRESH, MAX_ROUTE_PTS
+from config_loader import MAP_ZOOM, GPS_REFRESH, MAX_ROUTE_PTS, DISPLAY_MODE
 
 try:
     from libs.map_renderer import MapRenderer, cache_stats as _tile_cache_stats
@@ -48,7 +48,11 @@ class GPSDisplayApp:
     def __init__(self, input_mgr, state=None):
         self._input = input_mgr
         self._state = state
-        self._fb = FbDisplay(3)  # canvas 640x240
+        self._fb = FbDisplay(3, output="dual")  # las dos mini pantallas
+        self._map_fb = (
+            FbDisplay(1, output="hdmi", size=(640, 400))
+            if DISPLAY_MODE == "hdmi" else None
+        )
         self._running = False
         self._route_points = []
         self._zoom = MAP_ZOOM
@@ -56,7 +60,8 @@ class GPSDisplayApp:
         self._last_cached = False  # ¿estamos mostrando posición cacheada?
 
         if _HAS_MAP:
-            self._map = MapRenderer(width=320, height=240, zoom=self._zoom)
+            map_size = (640, 400) if DISPLAY_MODE == "hdmi" else (320, 240)
+            self._map = MapRenderer(width=map_size[0], height=map_size[1], zoom=self._zoom)
         else:
             self._map = None
 
@@ -95,6 +100,9 @@ class GPSDisplayApp:
 
         self._fb.blank()
         self._fb.update()
+        if self._map_fb:
+            self._map_fb.blank()
+            self._map_fb.update()
 
     def _render(self):
         gps = self._state.get_gps() if self._state else None
@@ -120,13 +128,22 @@ class GPSDisplayApp:
         inp = self._state.get_esp32_input() if self._state else None
         img_data = self._render_data(gps, using_cache, velo, dire, inp)
 
-        full = self._fb.image()
-        full.paste(img_map,  (0,   0))
-        full.paste(img_data, (320, 0))
-        self._fb.update()
+        if self._map_fb:
+            self._map_fb.image().paste(img_map, (0, 0))
+            self._map_fb.update()
+            img_status = self._render_mini_status(gps, velo, dire, inp)
+            full = self._fb.image()
+            full.paste(img_data, (0, 0))
+            full.paste(img_status, (320, 0))
+            self._fb.update()
+        else:
+            full = self._fb.image()
+            full.paste(img_map, (0, 0))
+            full.paste(img_data, (320, 0))
+            self._fb.update()
 
     def _render_map(self, gps, lat, lon, using_cache) -> Image.Image:
-        W, H = 320, 240
+        W, H = (640, 400) if self._map_fb else (320, 240)
         if lat == 0 and lon == 0:
             return self._render_no_gps(W, H)
 
@@ -153,6 +170,44 @@ class GPSDisplayApp:
             draw.rectangle([0, 0, W - 1, 16], fill=(80, 40, 0, 180))
             draw.text((4, 2), "⚠ Última posición conocida", font=self._f_small, fill=C_YELLOW)
 
+        return img
+
+    def _render_mini_status(self, gps, velo, dire, inp) -> Image.Image:
+        """HUD compacto para la segunda mini pantalla mientras GPS usa HDMI."""
+        W, H = 320, 240
+        img = Image.new("RGB", (W, H), (0, 0, 8))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([0, 0, W - 1, 22], fill=(20, 22, 30))
+        draw.text((8, 4), "MOTO HUD", font=self._f_small, fill=C_GREEN)
+
+        wheel = velo.speed if velo is not None else 0.0
+        gps_speed = gps.speed_kmh if gps else 0.0
+        draw.text((12, 30), "RUEDA", font=self._f_small, fill=C_DIM)
+        draw.text((10, 42), f"{wheel:.1f}", font=self._f_huge,
+                  fill=C_GREEN if velo and velo.online else C_DIM)
+        draw.text((175, 35), "GPS", font=self._f_small, fill=C_DIM)
+        draw.text((175, 50), f"{gps_speed:.1f}", font=self._f_big,
+                  fill=C_BLUE if gps and gps.has_fix else C_DIM)
+        draw.text((253, 66), "km/h", font=self._f_small, fill=C_DIM)
+
+        odo = velo.odometro if velo is not None else 0.0
+        pulses = velo.pulses if velo is not None else 0
+        draw.line([(8, 105), (W - 8, 105)], fill=(45, 45, 55))
+        draw.text((10, 112), f"ODO {odo:.3f} km", font=self._f_normal, fill=C_YELLOW)
+        draw.text((10, 135), f"PULSOS {pulses:,}", font=self._f_small, fill=C_DIM)
+        draw.text((170, 135), f"SAT {gps.num_satellites if gps else 0}", font=self._f_small, fill=C_GREEN)
+
+        left = bool(dire and dire.intermitente_izq)
+        right = bool(dire and dire.intermitente_der)
+        brake = bool(dire and dire.frenado) or bool(inp and inp.brake)
+        night = bool(dire and dire.luz_nocturna) or bool(inp and inp.night)
+        draw.text((10, 162), f"L:{'ON' if left else '--'}  R:{'ON' if right else '--'}", font=self._f_small,
+                  fill=C_YELLOW if left or right else C_DIM)
+        draw.text((10, 184), f"FRENO:{'ON' if brake else '--'}  NOC:{'ON' if night else '--'}",
+                  font=self._f_small, fill=C_RED if brake else (C_BLUE if night else C_DIM))
+        rssi = velo.rssi if velo is not None else "--"
+        draw.text((10, 210), f"MQTT:{'OK' if velo and velo.online else 'OFF'} RSSI:{rssi}",
+                  font=self._f_small, fill=C_GREEN if velo and velo.online else C_RED)
         return img
 
     def _render_no_gps(self, W: int, H: int) -> Image.Image:

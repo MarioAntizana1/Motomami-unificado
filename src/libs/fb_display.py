@@ -209,10 +209,11 @@ class FbDisplay:
     disp_id=3 → canvas 640x240 que divide en fb1 (izq) y fb2 (der)
     """
 
-    def __init__(self, disp_id=1):
+    def __init__(self, disp_id=1, output=None, size=None):
         self.id = disp_id
-        self.width = W * 2 if disp_id == 3 else W
-        self.height = H
+        self.output = output or ("hdmi" if DISPLAY_MODE == "hdmi" else "dual")
+        default_size = (W * 2, H) if disp_id == 3 else (W, H)
+        self.width, self.height = size or default_size
         self._img = Image.new("RGB", (self.width, self.height), (0, 0, 0))
         self._draw = ImageDraw.Draw(self._img)
 
@@ -234,14 +235,14 @@ class FbDisplay:
         return self._img
 
     def update(self):
-        if DISPLAY_MODE == "hdmi":
+        if self.output == "hdmi":
             _get_hdmi().show(self._img)
-        elif self.id == 3:
+        elif self.output == "dual" and self.id == 3:
             _get_fb1().show(self._img.crop((0, 0, W, H)))
             _get_fb2().show(self._img.crop((W, 0, W * 2, H)))
-        elif self.id == 1:
+        elif self.output == "dual" and self.id == 1:
             _get_fb1().show(self._img)
-        else:
+        elif self.output == "dual":
             _get_fb2().show(self._img)
 
     def resume(self):
