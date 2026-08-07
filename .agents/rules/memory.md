@@ -337,3 +337,14 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - Musica/video descubren fuentes locales y USB montadas; video conserva aspect ratio y compone en un canvas unico en HDMI.
 - `startup_app=gps` permite iniciar directamente en GPS; se puede cambiar a `menu` en `config.ini`.
 - RPi/AP se cayo repetidamente por bateria/inestabilidad. Tras volver, se desplego `932dd8a`, se configuro `display.mode=hdmi`/`startup_app=gps`, y se subio por OTA el firmware `4518ed0` con el fix de baja velocidad.
+
+## Session 2026-08-07 -- Routing HDMI/SPI y debounce GPIO
+
+- **Problema UI**: con HDMI activo, el menu (canvas 640x240) se estaba dibujando en `fb0`, y GPS reparto mapa/datos en las mini, todo muy lejos de lo que el usuario quiere: menu en las dos ST7789 siempre, GPS a pantalla completa en HDMI, y en las mini GPS una tarjeta de datos con velocidad grande.
+- **`FbDisplay` gana routing explicito**: `FbDisplay(disp_id, output="hdmi"|"dual", size=(w,h))`. `output` decide el destino (no `DISPLAY_MODE` global): `hdmi` → `fb0` con aspect-fit; `dual` → reparto `fb1`/`fb2` (id 3 reparte, 1→fb1, 2→fb2).
+- **Menu**: `main_menu.py` usa `FbDisplay(3, output="dual")` → siempre en mini, incluso con HDMI.
+- **GPS app**: crea `FbDisplay(1, output="hdmi", size=(640,400))` para el mapa (escala 2x exacta a 1280x800 sin deformar) via `MapRenderer(width=640, height=400)` y `FbDisplay(3, output="dual")` para las mini: pantalla 1 datos clasicos, pantalla 2 `_render_mini_status` (HUD: RUEDA grande, GPS, ODO, pulsos, SAT, L/R, FRENO/NOC, MQTT/RSSI). Sin HDMI sigue el reparto mapa/datos de siempre.
+- **Debounce GPIO** en `input_manager.py`: confirmacion estable de 40 ms (`_btn_candidate/_btn_candidate_since`), estado inicial tomado de `btn.value` real al construir para no disparar acciones fantasma al arranque.
+- Pasar `FbDisplay(3, output="dual")` el label `x=...` no olvidar: la app video no debe escribir `fb1/fb2` en modo HDMI (pendiente de revisar si usa `FbDisplay(3)` con bpp16).
+- Deploy `50bd337` verificado en RPi: servicio activo, fds abiertos para fb0/fb1/fb2, fb0 con contenido oscuro GPS (BUSCANDO GPS, sin fix aun), fb1/fb2 con datos. Logs del servicio tardan en aparecer por buffering de stdout con journald (`python3 -B -u` recomendado si se quiere log en vivo).
+- Ultima ubicacion: commit `50bd337` (main).
