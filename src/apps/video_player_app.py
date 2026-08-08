@@ -207,6 +207,7 @@ class VideoPlayer:
 
         # Audio: ffmpeg decodifica y aplay escribe directo a ALSA (evita SDL/ffplay).
         self._start_audio(filepath)
+        self.set_volume(self.volume)
 
         self.is_playing = True
         self.is_paused = False
