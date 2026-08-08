@@ -357,3 +357,13 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - **Gotcha**: `lsblk -J` emite `rm` como booleano JSON (`true`), NO como string `"1"`; y en esta version las particiones salen planas (sin `children`), con `rm` heredado. Comparar `node.get("rm") in (True, "1", 1)`.
 - Verificado en RPi: `USB: EXPO` → `/mnt/motomami_EXPO`, 28 videos (Initial D temporada completa). Deploy `e953931`, servicio activo.
 - Ultima ubicacion: commit `e953931` (main).
+
+## Session 2026-08-07 (3) -- Video: fullscreen HDMI, audio y velocidad
+
+- **3 problemas reportados en video**: lentisimo, pedia fullscreen, sin sonido.
+- **Audio roto**: ffplay/SDL no arranca con estos MP4 (reloj 0.000, `sq=0B`) Y **PipeWire del autologin tenia tomado el HDMI** (`/proc/asound/card0/pcm0p/sub0/status owner_pid=1317 RUNNING` → `hw:0,0` EBUSY). Fix: matados los procesos 844/845/848/849/1317 y **mascados los user units** `pipewire.socket`, `pipewire-pulse.socket`, `wireplumber.service`, `pipewire.service`, `pipewire-pulse.service` para el usuario `motomami` (no vuelven al boot). La app de audio ahora es `ffmpeg -ac 2 -ar 48000 -f s16le | aplay -D plughw:0,0` (bypass a SDL), thread pump; pause = amixer PCM 0% (mantiene sync), resume restaura volumen.
+- **Lentitud**: `_get_hdmi().show()` → `show_aspect_fit` hacia resize **LANCZOS 640x240→1280x480 cada frame ≈ 371 ms/frame**. Fix estructural: en HDMI el video sale por ffmpeg con `scale=1280:800:force_original_aspect_ratio=decrese,pad=1280:800` + `-pix_fmt rgb565le` (LITTLE-ENDIAN), raw bytes al fb via nuevo `FramebufferDisplay.write_rgb565()` (1.3 ms/frame). Fallback legacy 320x240 PIL igual que antes.
+- **Pantalla completa**: canvas de video == resolucion nativa del fb0 (1280x800) → escrito directo, sin rescale PIL. Info/progreso/vol en las dos mini (fb1/fb2) via `FbDisplay(3, output="dual")` a 1 Hz; UI ya NO se redibuja por frame.
+- Bench en RPi: decode+scale 10s de video ≈ 10.9s wall (≈0.92x realtime con default), write raw 1.3ms/frame → target 10 fps holgado. numpy YA instalado 2.2.4 (el bug NUNCA fue numpy sino el RESIZE por frame).
+- Deploy final `681d4fc`; servicio activo verificado. NOTA: `pkill -f "^pipewire"` no mató procesos (cmdline empieza con `/usr/bin/pipewire`); usar tal PID.
+- Ultima ubicacion: commit `681d4fc` (main).
