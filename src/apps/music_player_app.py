@@ -29,7 +29,6 @@ class MusicBrowser:
         self.selected = 0
         self.playing_idx = -1
         self.scroll = 0
-        self.sources = discover_media_sources(root_dir, "MUSICA")
         self.root_folder = root_dir
         self.current_folder = None
         self._hist = []
@@ -40,6 +39,7 @@ class MusicBrowser:
         self.names = []
         self.is_dir = []
         if self.current_folder is None:
+            self.sources = discover_media_sources(self.root_folder, "MUSICA")
             for source in self.sources:
                 self.files.append(source.path)
                 self.names.append(f"[FUENTE] {source.label}")

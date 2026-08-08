@@ -39,7 +39,6 @@ class FileBrowser:
         self.selected = 0
         self.playing_idx = -1
         self.scroll = 0
-        self.sources = discover_media_sources(config_loader.MOVIES_DIR, "VIDEO")
         self.current_folder = None
         self._hist = []
         self.refresh()
@@ -55,6 +54,7 @@ class FileBrowser:
         self.names = []
         self.is_dir = []
         if self.current_folder is None:
+            self.sources = discover_media_sources(config_loader.MOVIES_DIR, "VIDEO")
             for source in self.sources:
                 self.files.append(source.path)
                 self.names.append(f"[FUENTE] {source.label}")
