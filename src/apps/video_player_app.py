@@ -16,15 +16,16 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 import config_loader
-from libs.fb_display import FbDisplay, _find_font, _get_fb1, _get_fb2
+from libs.fb_display import FbDisplay, _find_font, _get_fb1, _get_fb2, _get_hdmi
 from libs.media_sources import discover_media_sources
 
 VIDEO_EXT = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v')
 VOLUME_STEP = 5
 AUDIO_DEVICE = "plughw:0,0"  # HDMI (card 0), evita el default roto por PipeWire
 
-if config_loader.DISPLAY_MODE == "hdmi":
-    VIDEO_W, VIDEO_H = 640, 400   # escala 2x exacta -> 1280x800 sin deformar
+_IS_HDMI = config_loader.DISPLAY_MODE == "hdmi"
+if _IS_HDMI:
+    VIDEO_W, VIDEO_H = 1280, 800   # resolucion nativa del fb HDMI (sin rescale)
 else:
     VIDEO_W, VIDEO_H = 320, 240
 
@@ -156,21 +157,24 @@ class FileBrowser:
 
 
 class VideoPlayer:
-    def __init__(self, frame_sink=None):
+    def __init__(self, frame_sink=None, raw=False):
         self.ffmpeg_proc = None
         self.audio_proc = None
+        self._aplay_proc = None
         self._audio_thread = None
         self.is_playing = False
         self.is_paused = False
         self.current_file = None
         self.duration = 0.0
         self.position = 0.0
-        self.volume = 80
+        self.volume = 70
         self._running = False
         self._thread = None
         self._frame_sink = frame_sink
+        self._raw = raw
         self._frame_w = VIDEO_W
         self._frame_h = VIDEO_H
+        self._frame_bytes = VIDEO_W * VIDEO_H * (2 if raw else 3)
         self.target_fps = 10
         self._seek_offset = 0.0
 
@@ -183,6 +187,7 @@ class VideoPlayer:
         self.position = 0.0
         self._analyze_video(filepath)
 
+        pix_fmt = 'rgb565le' if self._raw else 'rgb24'
         try:
             self.ffmpeg_proc = subprocess.Popen(
                 ['ffmpeg', '-v', 'error', '-re',
@@ -191,7 +196,7 @@ class VideoPlayer:
                  '-vf', (f'scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,'
                          f'pad={VIDEO_W}:{VIDEO_H}:(ow-iw)/2:(oh-ih)/2:black'),
                  '-f', 'rawvideo',
-                 '-pix_fmt', 'rgb24',
+                 '-pix_fmt', pix_fmt,
                  '-an', '-sn', '-'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 bufsize=2048 * 1024,
@@ -271,11 +276,10 @@ class VideoPlayer:
         if not proc:
             self.is_playing = False
             return
-        frame_size = self._frame_w * self._frame_h * 3
+        frame_size = self._frame_bytes
         frame_n = 0
         time.sleep(0.5)
         t0 = time.time()
-        fb1 = _get_fb1() if self._frame_sink is None else None
         try:
             while self._running and proc.poll() is None:
                 if self.is_paused:
@@ -285,11 +289,15 @@ class VideoPlayer:
                 if not raw or len(raw) < frame_size:
                     break
                 try:
-                    img = Image.frombuffer('RGB', (self._frame_w, self._frame_h), raw, 'raw', 'RGB', 0, 1)
-                    if self._frame_sink:
-                        self._frame_sink(img)
+                    if self._raw:
+                        if self._frame_sink:
+                            self._frame_sink(raw)
                     else:
-                        fb1.show(img)
+                        img = Image.frombuffer('RGB', (self._frame_w, self._frame_h), raw, 'raw', 'RGB', 0, 1)
+                        if self._frame_sink:
+                            self._frame_sink(img)
+                        else:
+                            _get_fb1().show(img)
                 except Exception:
                     pass
                 frame_n += 1
@@ -385,16 +393,12 @@ class VideoPlayerApp:
         self._input = input_mgr
         self._state = state
         self._fb = FbDisplay(3)
-        self._is_hdmi = config_loader.DISPLAY_MODE == "hdmi"
-        if self._is_hdmi:
-            self._video_fb = FbDisplay(1, output="hdmi", size=(VIDEO_W, VIDEO_H))
-            self._info_fb = FbDisplay(3, output="dual")
-        else:
-            self._video_fb = None
-            self._info_fb = None
+        self._is_hdmi = _IS_HDMI
+        self._raw_hdmi = _get_hdmi() if self._is_hdmi else None
+        self._info_fb = FbDisplay(3, output="dual") if self._is_hdmi else None
         self._running = False
         self.browser = FileBrowser()
-        self.player = VideoPlayer(frame_sink=self._on_video_frame)
+        self.player = VideoPlayer(frame_sink=self._on_video_frame, raw=self._is_hdmi)
         self.mode = 'browser'
         self.last_upd = 0
 
@@ -425,9 +429,8 @@ class VideoPlayerApp:
         self.player.stop()
         self._fb.blank()
         self._fb.update()
-        if self._video_fb:
-            self._video_fb.blank()
-            self._video_fb.update()
+        if self._raw_hdmi:
+            self._raw_hdmi.blank()
 
     def _handle_action(self, action):
         if self.mode == 'browser':
@@ -571,14 +574,15 @@ class VideoPlayerApp:
         else:
             _get_fb2().show(img)
 
-    def _on_video_frame(self, img):
-        """Frames de video: va directo al framebuffer activo, sin UI por frame."""
+    def _on_video_frame(self, data):
+        """Frames de video: en HDMI bytes RGB565 directos al framebuffer,
+        en mini una imagen PIL a fb1. Sin redibujado de UI por frame."""
         if not self._is_hdmi:
-            _get_fb1().show(img)
+            img = data if isinstance(data, Image.Image) else None
+            if img is not None:
+                _get_fb1().show(img)
             return
-        fb = self._video_fb
         try:
-            fb.image().paste(img, (0, 0))
-            fb.update()
+            self._raw_hdmi.write_rgb565(data)
         except Exception:
             pass

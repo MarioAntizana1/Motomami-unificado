@@ -158,6 +158,22 @@ class FramebufferDisplay:
         else:
             self._write(img)
 
+    def write_rgb565(self, data: bytes):
+        """Escritura raw RGB565 little-endian (bytes exactos width*height*2).
+        Ideal para frames de video desde ffmpeg (pix_fmt rgb565le)."""
+        if self.bpp != 16:
+            return
+        n = self.width * self.height * 2
+        self._mmap.seek(0)
+        if self.stride == self.width * 2 and len(data) >= n:
+            self._mmap.write(data[:n])
+        else:
+            row = self.width * 2
+            for y in range(self.height):
+                src = data[y * row:(y + 1) * row]
+                self._mmap.seek(y * self.stride)
+                self._mmap.write(src)
+
     def blank(self):
         """Apaga la pantalla (pone todo en negro)."""
         self._mmap.seek(0)
