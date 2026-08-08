@@ -21,7 +21,7 @@ from libs.media_sources import discover_media_sources
 
 VIDEO_EXT = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v')
 VOLUME_STEP = 5
-AUDIO_DEVICE = "plughw:0,0"  # HDMI (card 0), evita el default roto por PipeWire
+AUDIO_DEVICE = "default"  # sigue /etc/asound.conf → card 0 (FiiO si conectado, si no HDMI)
 
 _IS_HDMI = config_loader.DISPLAY_MODE == "hdmi"
 if _IS_HDMI:
@@ -175,7 +175,7 @@ class VideoPlayer:
         self._frame_w = VIDEO_W
         self._frame_h = VIDEO_H
         self._frame_bytes = VIDEO_W * VIDEO_H * (2 if raw else 3)
-        self.target_fps = 10
+        self.target_fps = 12
         self._seek_offset = 0.0
 
     def play(self, filepath):
@@ -190,7 +190,7 @@ class VideoPlayer:
         pix_fmt = 'rgb565le' if self._raw else 'rgb24'
         try:
             self.ffmpeg_proc = subprocess.Popen(
-                ['ffmpeg', '-v', 'error', '-re',
+                ['ffmpeg', '-v', 'error',
                  '-i', filepath,
                  '-r', f'{self.target_fps}',
                  '-vf', (f'scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,'
@@ -199,7 +199,7 @@ class VideoPlayer:
                  '-pix_fmt', pix_fmt,
                  '-an', '-sn', '-'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                bufsize=2048 * 1024,
+                bufsize=8192 * 1024,
             )
         except FileNotFoundError:
             print("[Video] ffmpeg no instalado")
