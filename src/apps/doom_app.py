@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-doom_app.py - CHOCOLATE DOOM launcher for MotoMami.
-Runs Doom on Display 1 (left) using Xvfb + mss for screen capture.
-Display 2 (right) shows static DOOM logo.
+doom_app.py - Crispy/Chocolate DOOM para MotoMami, pantalla completa HDMI.
+Xvfb 640x400 capturado con mss y mostrado en el canvas 640x400.
 """
 import os
 import sys
@@ -16,7 +15,7 @@ _SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from libs.fb_display import FbDisplay, _find_font, W, H
+from libs.fb_display import FbDisplay, _find_font
 
 try:
     import mss
@@ -24,18 +23,24 @@ try:
 except ImportError:
     _HAS_MSS = False
 
+DOOM_W = 640
+DOOM_H = 400
+
+
 class DoomApp:
     def __init__(self, input_mgr, state=None):
         self._input = input_mgr
         self._state = state
-        self._fb = FbDisplay(3)  # Dual screen canvas 640x240
+        self._fb = FbDisplay(3)
         self._running = False
         self.doom_process = None
         self.xvfb_process = None
         self.game_running = False
         self.capture_thread = None
-        
-        # Buscar wads en /home/motomami/moto/ y /home/motomami/moto/wads/ y /home/motomami/final/src/apps/wads/
+        self.last_frame = None
+        self._fps_count = 0
+        self._fps_t0 = 0.0
+
         self.wads = self._find_wads()
         self.selected_wad_idx = 0
 
@@ -62,7 +67,6 @@ class DoomApp:
 
         while self._running:
             if not self.game_running:
-                # Menú de selección
                 evt = self._input.get_event(timeout=0.1)
                 if evt:
                     action, _ = evt
@@ -77,91 +81,77 @@ class DoomApp:
                     elif action == "ENTER":
                         self.start_game()
             else:
-                # Juego ejecutándose, comprobar si terminó el proceso
+                if self.last_frame:
+                    self._draw_game_frame(self.last_frame)
+                    self.last_frame = None
+
                 if self.doom_process and self.doom_process.poll() is not None:
-                    print("[Doom] Chocolate Doom terminó.")
                     self.stop_game()
-                
-                # O si el usuario presionó BACK para salir
-                evt = self._input.get_event(timeout=0.1)
+
+                evt = self._input.get_event(timeout=0.03)
                 if evt:
                     action, _ = evt
                     if action == "BACK":
-                        print("[Doom] Cancelando por el usuario (BACK).")
                         self.stop_game()
 
         self._fb.blank()
         self._fb.update()
 
     def _find_doom_binary(self):
-        # crispy-doom preferido: soporta mouselook (mirar arriba/abajo)
         candidates = ["crispy-doom", "chocolate-doom", "chocolate-doom3", "doom"]
         for c in candidates:
             try:
                 r = subprocess.run(["which", c], capture_output=True, text=True, timeout=2)
                 if r.returncode == 0 and r.stdout.strip():
                     return r.stdout.strip()
-            except:
+            except Exception:
                 pass
-        for p in ["/usr/games/crispy-doom", "/usr/bin/crispy-doom",
-                   "/usr/local/bin/crispy-doom",
-                   "/usr/games/chocolate-doom", "/usr/bin/chocolate-doom",
-                   "/usr/local/bin/chocolate-doom", "/usr/games/doom"]:
-            if os.path.exists(p):
-                return p
-        return "chocolate-doom"
+        return "crispy-doom"
 
     def start_game(self):
         if not _HAS_MSS:
-            self._render_error("Instale 'mss':\nsudo pip3 install mss")
+            self._render_error("Instale 'mss': sudo pip3 install mss")
             return
 
         doom_bin = self._find_doom_binary()
-        print(f"[Doom] Usando binario: {doom_bin}")
 
-        print("[Doom] Lanzando Xvfb...")
         try:
             self.xvfb_process = subprocess.Popen(
-                ["Xvfb", ":99", "-screen", "0", "320x240x24", "-nolisten", "tcp"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                ["Xvfb", ":99", "-screen", "0", f"{DOOM_W}x{DOOM_H}x24", "-nolisten", "tcp"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-            time.sleep(1)
-            
-            print("[Doom] Lanzando Chocolate Doom...")
+            time.sleep(0.8)
+
             env = os.environ.copy()
             env["DISPLAY"] = ":99"
-            
-            cmd = [doom_bin, "-width", "320", "-height", "200"]
+
+            cmd = [doom_bin, "-width", str(DOOM_W), "-height", str(DOOM_H)]
             selected_wad = self.wads[self.selected_wad_idx]
             if selected_wad != "Autodetectar WAD del sistema":
                 cmd.extend(["-iwad", selected_wad])
-            
-            try:
-                self.doom_process = subprocess.Popen(
-                    cmd, env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-            except FileNotFoundError:
-                self._render_error(f"No se encontro:\n{doom_bin}\n\n"
-                                   "Instala crispy-doom:\nsudo apt install crispy-doom")
-                self.stop_game()
-                return
 
-            self.game_running = True
-            self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
-            self.capture_thread.start()
-            
-        except Exception as e:
-            self._render_error(f"Error al iniciar Doom:\n{e}")
+            self.doom_process = subprocess.Popen(
+                cmd, env=env,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            self._render_error(f"No se encontro: {doom_bin}")
             self.stop_game()
+            return
+        except Exception as e:
+            self._render_error(f"Error al iniciar Doom: {e}")
+            self.stop_game()
+            return
+
+        self.game_running = True
+        self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.capture_thread.start()
 
     def stop_game(self):
         self.game_running = False
         if self.capture_thread and self.capture_thread.is_alive():
             self.capture_thread.join(timeout=1.0)
-        
+
         if self.doom_process:
             try:
                 self.doom_process.terminate()
@@ -187,77 +177,77 @@ class DoomApp:
         self._draw_menu()
 
     def _capture_loop(self):
-        os.environ["DISPLAY"] = ":99"
-        
+        import os as _os
+        _os.environ["DISPLAY"] = ":99"
+        self._fps_count = 0
+        self._fps_t0 = time.time()
+
         with mss.mss() as sct:
+            monitor = {"top": 0, "left": 0, "width": DOOM_W, "height": DOOM_H}
             while self.game_running:
                 try:
-                    sct_img = sct.grab(sct.monitors[1])
+                    sct_img = sct.grab(monitor)
                     img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-                    self._draw_game_frame(img)
-                except Exception as e:
-                    print(f"[Doom Capture] Error: {e}")
-                    time.sleep(0.1)
+                    self.last_frame = img
+                    self._fps_count += 1
+                except Exception:
+                    time.sleep(0.05)
 
     def _draw_menu(self):
         self._fb.blank()
-        draw = self._fb.draw()
-        BG = (0, 0, 8)
-        DIV = (80, 80, 80)
-        draw.rectangle([(0, 0), (640, 240)], fill=BG)
-        draw.line([(319, 0), (319, 239)], fill=DIV, width=2)
+        d = self._fb.draw()
 
-        # ── Pantalla 1 (Izquierda): Selector de WADs ──
-        draw.text((8, 5), "CHOCOLATE DOOM", font=self._fb.font_title, fill=(255, 50, 50))
-        draw.text((8, 40), "Selecciona WAD:", font=self._fb.font, fill=(200, 200, 200))
+        d.rectangle([(0, 0), (639, 399)], fill=(8, 0, 0))
 
-        y = 65
+        d.rectangle([(0, 0), (639, 50)], fill=(60, 0, 0))
+        d.text((20, 10), "CHOCOLATE DOOM", font=_find_font(24), fill=(255, 50, 50))
+
+        d.text((20, 70), "Selecciona WAD:", font=_find_font(14), fill=(200, 200, 200))
+
+        y = 100
         for i, wad in enumerate(self.wads):
-            color = (0, 255, 100) if i == self.selected_wad_idx else (100, 100, 100)
+            color = (0, 255, 100) if i == self.selected_wad_idx else (140, 140, 140)
             prefix = "> " if i == self.selected_wad_idx else "  "
-            name = os.path.basename(wad)[:20]
-            draw.text((8, y), f"{prefix}{name}", font=self._fb.font, fill=color)
-            y += 22
-            if y > 210:
+            name = os.path.basename(wad)[:35]
+            font = _find_font(13)
+            d.text((30, y), f"{prefix}{name}", font=font, fill=color)
+            y += 26
+            if y > 350:
                 break
 
-        draw.text((8, 225), "ENTER=Jugar  BACK=Salir  ^v=WAD", font=self._fb.font_s, fill=(100, 150, 255))
-
-        # ── Pantalla 2 (Derecha): Logo DOOM ──
-        ox = 321
-        draw.text((ox + 60, 85), "DOOM", font=self._fb.font_big, fill=(255, 0, 0))
-        draw.text((ox + 55, 135), "SPI Edition", font=self._fb.font, fill=(100, 100, 100))
-        draw.text((ox + 35, 160), "Display #1 para juego", font=self._fb.font_s, fill=(80, 80, 100))
+        d.text((20, 370), "ENTER=Jugar  BACK=Salir  UP/DOWN=WAD",
+               font=_find_font(11), fill=(150, 100, 100))
 
         self._fb.update()
 
     def _draw_game_frame(self, doom_img):
         self._fb.blank()
-        draw = self._fb.draw()
-
-        # Pegar el frame de Doom en la mitad izquierda (Display 1)
         if doom_img:
-            if doom_img.size != (320, 240):
-                doom_img = doom_img.resize((320, 240))
+            if doom_img.size != (DOOM_W, DOOM_H):
+                doom_img = doom_img.resize((DOOM_W, DOOM_H))
             self._fb.image().paste(doom_img, (0, 0))
 
-        # Dibujar Display 2 (Derecha) estático durante el juego
-        ox = 321
-        draw.rectangle([(320, 0), (639, 239)], fill=(0, 0, 0))
-        draw.text((ox + 60, 85), "DOOM", font=self._fb.font_big, fill=(255, 0, 0))
-        draw.text((ox + 40, 135), "En juego...", font=self._fb.font, fill=(100, 100, 100))
-        draw.line([(319, 0), (319, 239)], fill=(80, 80, 80), width=2)
+        d = self._fb.draw()
+        t = time.time()
+        if t - self._fps_t0 >= 2.0 and self._fps_count > 0:
+            fps = self._fps_count / (t - self._fps_t0)
+            self._fps_count = 0
+            self._fps_t0 = t
+        else:
+            fps = 0
+        bar = f"FPS:{fps:.0f}" if fps > 0 else "BACK=Salir"
+        d.text((8, DOOM_H - 14), bar, font=_find_font(11), fill=(180, 180, 200))
 
         self._fb.update()
 
     def _render_error(self, text):
         self._fb.blank()
-        draw = self._fb.draw()
-        draw.text((20, 50), text, font=self._fb.font, fill=(255, 0, 0))
-        draw.text((20, 180), "Presione ENTER o BACK para volver", font=self._fb.font_s, fill=(150, 150, 150))
+        d = self._fb.draw()
+        d.text((20, 50), text, font=_find_font(14), fill=(255, 0, 0))
+        d.text((20, 250), "Presione ENTER o BACK para volver",
+               font=_find_font(11), fill=(150, 150, 150))
         self._fb.update()
-        
-        # Bloquear hasta que el usuario presione ENTER o BACK
+
         waiting = True
         while waiting:
             evt = self._input.get_event(timeout=0.1)
