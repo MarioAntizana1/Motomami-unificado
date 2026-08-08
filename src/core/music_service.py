@@ -16,27 +16,28 @@ AUDIO_EXTENSIONS = ('.mp3', '.wav', '.flac', '.ogg')
 def _free_audio_device():
     """Libera el DAC USB si está ocupado."""
     import subprocess
-    dev = '/dev/snd/pcmC1D0p'
-    if not os.path.exists(dev):
-        return
-    for _ in range(3):
-        for proc in ('wireplumber', 'pipewire-pulse'):
-            try:
-                subprocess.run(['pkill', '-9', proc], capture_output=True, timeout=2)
-            except Exception:
-                pass
-        try:
-            out = subprocess.run(['fuser', dev], capture_output=True, text=True, timeout=2).stdout.strip()
-            if not out:
-                return
-            for tok in out.split():
+    devs = ['/dev/snd/pcmC0D0p', '/dev/snd/pcmC1D0p']
+    for dev in devs:
+        if not os.path.exists(dev):
+            continue
+        for _ in range(3):
+            for proc in ('wireplumber', 'pipewire-pulse', 'pulseaudio'):
                 try:
-                    os.kill(int(tok), 9)
+                    subprocess.run(['pkill', '-9', proc], capture_output=True, timeout=2)
                 except Exception:
                     pass
-            time.sleep(0.3)
-        except Exception:
-            pass
+            try:
+                out = subprocess.run(['fuser', dev], capture_output=True, text=True, timeout=2).stdout.strip()
+                if not out:
+                    break
+                for tok in out.split():
+                    try:
+                        os.kill(int(tok), 9)
+                    except Exception:
+                        pass
+                time.sleep(0.3)
+            except Exception:
+                pass
 
 
 class MusicService:
@@ -61,8 +62,8 @@ class MusicService:
         try:
             import pygame
             pygame.mixer.pre_init(
-                frequency=22050, size=-16, channels=2,
-                buffer=4096, allowedchanges=0
+                frequency=44100, size=-16, channels=2,
+                buffer=2048, allowedchanges=1
             )
             pygame.mixer.init()
             pygame.mixer.music.set_volume(self._volume / 100.0)
