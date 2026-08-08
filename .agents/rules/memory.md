@@ -348,3 +348,12 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - Pasar `FbDisplay(3, output="dual")` el label `x=...` no olvidar: la app video no debe escribir `fb1/fb2` en modo HDMI (pendiente de revisar si usa `FbDisplay(3)` con bpp16).
 - Deploy `50bd337` verificado en RPi: servicio activo, fds abiertos para fb0/fb1/fb2, fb0 con contenido oscuro GPS (BUSCANDO GPS, sin fix aun), fb1/fb2 con datos. Logs del servicio tardan en aparecer por buffering de stdout con journald (`python3 -B -u` recomendado si se quiere log en vivo).
 - Ultima ubicacion: commit `50bd337` (main).
+
+## Session 2026-08-07 (2) -- USB automontable
+
+- **Sintoma**: USB EXPO conectado (`/dev/sda1`, vfat) invisible en video/musica.
+- **Causa raiz**: no hay automontaje en la RPi headless (solo `libudisks2`, sin usbmount/udev rules) y `discover_media_sources` solo listaba particiones ya montadas (mountpoint vacio).
+- **Fix**: `media_sources.py` → `_removable_parts()` detecta particiones con `rm=true` y `_ensure_usb_mounted()` las monta en `/mnt/motomami_<label>` (el servicio corre como root); `FileBrowser` y `MusicBrowser` re-descubren fuentes cada vez que vuelven a la raiz (USB hotplug sin reiniciar).
+- **Gotcha**: `lsblk -J` emite `rm` como booleano JSON (`true`), NO como string `"1"`; y en esta version las particiones salen planas (sin `children`), con `rm` heredado. Comparar `node.get("rm") in (True, "1", 1)`.
+- Verificado en RPi: `USB: EXPO` → `/mnt/motomami_EXPO`, 28 videos (Initial D temporada completa). Deploy `e953931`, servicio activo.
+- Ultima ubicacion: commit `e953931` (main).
