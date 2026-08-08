@@ -79,7 +79,7 @@ class MusicBrowser:
 
     def get_display_list(self):
         r = []
-        for i in range(self.scroll, min(self.scroll + 8, len(self.files))):
+        for i in range(self.scroll, min(self.scroll + 15, len(self.files))):
             r.append((i, self.clean_name(self.names[i]), i == self.playing_idx))
         return r
 
@@ -92,8 +92,8 @@ class MusicBrowser:
     def move_down(self):
         if self.selected < len(self.files) - 1:
             self.selected += 1
-        if self.selected >= self.scroll + 8:
-            self.scroll = self.selected - 7
+        if self.selected >= self.scroll + 15:
+            self.scroll = self.selected - 14
 
     def get_selected_path(self):
         if 0 <= self.selected < len(self.files):
@@ -264,10 +264,12 @@ class MusicPlayerApp:
         d = self._fb.draw()
         D = (80, 80, 80)
         
+        W, H = 640, 400
+
         # Fondo oscuro para ambas pantallas
-        d.rectangle([(0, 0), (640, 240)], fill=(0, 0, 8))
+        d.rectangle([(0, 0), (W - 1, H - 1)], fill=(0, 0, 8))
         # Línea divisoria central
-        d.line([(319, 0), (319, 239)], fill=D, width=2)
+        d.line([(319, 0), (319, H - 1)], fill=D, width=2)
 
         # ─── PANTALLA 1 (IZQ / SUPERIOR): REPRODUCTOR ───
         # Header
@@ -321,7 +323,7 @@ class MusicPlayerApp:
             "<- ->: Seek  UP/DOWN: Vol en play",
             "Arriba/Abajo: Navegar lista (en pausa)"
         ]):
-            d.text((8, 190 + i * 14), h, font=self._fb.font_s, fill=(100, 100, 130))
+            d.text((8, 330 + i * 14), h, font=self._fb.font_s, fill=(100, 100, 130))
 
         # ─── PANTALLA 2 (DER / INFERIOR): EXPLORADOR ───
         ox = 321
@@ -330,7 +332,7 @@ class MusicPlayerApp:
         d.text((ox + 8, 3), p, font=self._fb.font_xs, fill=(200, 150, 255))
         d.line([(ox, 23), (ox + 318, 23)], fill=(60, 30, 80))
         
-        vis = self.browser.get_display_list()[:8]
+        vis = self.browser.get_display_list()[:15]
         yy = 28
         for i, nm, pl in vis:
             isd = i < len(self.browser.is_dir) and self.browser.is_dir[i]
@@ -357,6 +359,6 @@ class MusicPlayerApp:
         # Canción sonando actualmente mostrada en footer del explorador
         if self._music and self._music.is_playing and curr_file:
             n2 = self.browser.clean_name(os.path.basename(curr_file))
-            d.text((ox + 4, 225), f"Now: {n2}", font=self._fb.font_xs, fill=(100, 200, 100))
+            d.text((ox + 4, H - 16), f"Now: {n2}", font=self._fb.font_xs, fill=(100, 200, 100))
             
         self._fb.update()
