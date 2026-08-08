@@ -78,6 +78,7 @@ class MusicService:
             return True
         except Exception as e:
             print(f"[Music] Error init mixer: {e}")
+            self._release_mixer()
             return False
 
     def _release_mixer(self):
@@ -107,6 +108,7 @@ class MusicService:
                 return True
             except Exception as e:
                 print(f"[Music] Error play: {e}")
+                self._release_mixer()
                 return False
 
     def pause_toggle(self):

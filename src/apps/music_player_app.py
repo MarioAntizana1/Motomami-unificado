@@ -196,6 +196,8 @@ class MusicPlayerApp:
 
         self._fb.blank()
         self._fb.update()
+        if self._music and self._music.is_playing:
+            self._music.stop()
 
     def _play_selected(self):
         p = self.browser.get_selected_path()
