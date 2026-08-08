@@ -119,7 +119,56 @@ class GPSDisplayApp:
         img_map = self._render_map(gps, lat, lon, using_cache)
         full = self._fb.image()
         full.paste(img_map, (0, 0))
+
+        # ── Barra HUD superior: direccionales + velocidad ──
+        dire = self._state.get_esp32_direccionales() if self._state else None
+        velo = self._state.get_esp32_velocimetro() if self._state else None
+        self._draw_hud(full, gps, dire, velo)
+
         self._fb.update()
+
+    def _draw_hud(self, img, gps, dire, velo):
+        from PIL import ImageDraw
+        d = ImageDraw.Draw(img)
+        W, H = 640, 400
+
+        d.rectangle([(0, 0), (W - 1, 32)], fill=(0, 0, 0, 180))
+        d.line([(0, 32), (W - 1, 32)], fill=(60, 60, 60))
+
+        # Direccional izquierda
+        left = bool(dire and dire.intermitente_izq)
+        lc = (0, 255, 100) if left else (40, 40, 40)
+        d.polygon([(30, 18), (10, 10), (30, 6)], fill=lc)
+        if left:
+            d.polygon([(30, 18), (10, 10), (30, 6)], fill=lc)
+        else:
+            d.polygon([(30, 18), (10, 10), (30, 6)], outline=(60, 60, 60))
+
+        # Direccional derecha
+        right = bool(dire and dire.intermitente_der)
+        rc = (0, 255, 100) if right else (40, 40, 40)
+        d.polygon([(W - 30, 18), (W - 10, 10), (W - 30, 6)], fill=rc)
+        if right:
+            d.polygon([(W - 30, 18), (W - 10, 10), (W - 30, 6)], fill=rc)
+        else:
+            d.polygon([(W - 30, 18), (W - 10, 10), (W - 30, 6)], outline=(60, 60, 60))
+
+        # Velocidad GPS al centro
+        spd = gps.speed_kmh if gps and gps.has_fix else 0.0
+        spd_text = f"{spd:.0f}"
+        spd_font = _find_font(24)
+        bb = d.textbbox((0, 0), spd_text, font=spd_font)
+        tw, th = bb[2] - bb[0], bb[3] - bb[1]
+        d.text(((W - tw) // 2, 2), spd_text, font=spd_font, fill=(255, 255, 255))
+
+        # km/h pequeño debajo
+        unit_font = _find_font(9)
+        d.text(((W + tw) // 2 + 3, 18), "km/h", font=unit_font, fill=(150, 150, 150))
+
+        # Velocidad rueda (opcional, pequeña)
+        wheel = velo.speed if velo is not None else 0.0
+        if wheel > 0:
+            d.text((W // 2 - 80, 18), f"R:{wheel:.0f}", font=unit_font, fill=(100, 180, 255))
 
     def _render_map(self, gps, lat, lon, using_cache) -> Image.Image:
         W, H = 640, 400
