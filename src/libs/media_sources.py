@@ -35,7 +35,7 @@ def _removable_parts() -> list[dict]:
 
     parts = []
     for node in data.get("blockdevices", []):
-        if str(node.get("rm", "0")) != "1":
+        if node.get("rm") not in (True, "1", 1):
             continue
         children = node.get("children") or []
         for part in children if children else [node]:
