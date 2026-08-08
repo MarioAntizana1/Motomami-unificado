@@ -15,7 +15,7 @@ _SRC = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from libs.fb_display import FbDisplay, _find_font
+from libs.fb_display import FbDisplay, _find_font, _release_hdmi, _reopen_hdmi
 
 
 class DoomApp:
@@ -71,6 +71,7 @@ class DoomApp:
                 if self._doom and self._doom.poll() is not None:
                     self._doom = None
                     self._game_running = False
+                    _reopen_hdmi()
                     self._fb.blank()
                     self._fb.update()
                     self._draw_menu()
@@ -108,8 +109,12 @@ class DoomApp:
     def _launch_doom(self):
         doom_bin = self._find_doom_binary()
 
+        # Liberar el framebuffer HDMI para que SDL2/KMSDRM lo use
+        _release_hdmi()
+
         env = os.environ.copy()
         env["SDL_VIDEODRIVER"] = "kmsdrm"
+        env["SDL_AUDIODRIVER"] = "alsa"
 
         cmd = [doom_bin]
         selected_wad = self.wads[self.selected_wad_idx]
@@ -124,9 +129,11 @@ class DoomApp:
             self._game_running = True
         except FileNotFoundError:
             self._render_error(f"No se encontro: {doom_bin}")
+            _reopen_hdmi()
             return
         except Exception as e:
             self._render_error(f"Error: {e}")
+            _reopen_hdmi()
             return
 
     def _kill_doom(self):
@@ -141,6 +148,9 @@ class DoomApp:
                     pass
             self._doom = None
         self._game_running = False
+        _reopen_hdmi()
+        self._fb.blank()
+        self._fb.update()
 
     def _draw_menu(self):
         self._fb.blank()

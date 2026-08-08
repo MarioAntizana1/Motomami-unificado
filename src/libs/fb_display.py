@@ -184,6 +184,13 @@ class FramebufferDisplay:
         self._mmap.close()
         os.close(self._fd)
 
+    def reopen(self):
+        self._fd = os.open(self.fb_path, os.O_RDWR)
+        self._mmap = mmap.mmap(
+            self._fd, self.buf_size, mmap.MAP_SHARED,
+            mmap.PROT_READ | mmap.PROT_WRITE
+        )
+
 
 # ── Instancias globales (singleton por proceso) ──
 _d1: FramebufferDisplay = None
@@ -210,6 +217,21 @@ def _get_hdmi() -> FramebufferDisplay:
     if _hdmi is None:
         _hdmi = FramebufferDisplay(HDMI_FB_PATH)
     return _hdmi
+
+
+def _release_hdmi():
+    global _hdmi
+    if _hdmi is not None:
+        _hdmi.close()
+        _hdmi = None
+
+
+def _reopen_hdmi():
+    global _hdmi
+    if _hdmi is None:
+        _hdmi = FramebufferDisplay(HDMI_FB_PATH)
+    else:
+        _hdmi.reopen()
 
 
 # ── Compatibilidad con código existente ──
