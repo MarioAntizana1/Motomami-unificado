@@ -227,9 +227,13 @@ class FbDisplay:
 
     def __init__(self, disp_id=1, output=None, size=None):
         self.id = disp_id
-        self.output = output or ("hdmi" if DISPLAY_MODE == "hdmi" else "dual")
-        default_size = (W * 2, H) if disp_id == 3 else (W, H)
-        self.width, self.height = size or default_size
+        self.output = output or "hdmi"
+        if size:
+            self.width, self.height = size
+        elif disp_id == 3:
+            self.width, self.height = 640, 400  # escala 2x exacta -> 1280x800
+        else:
+            self.width, self.height = W, H
         self._img = Image.new("RGB", (self.width, self.height), (0, 0, 0))
         self._draw = ImageDraw.Draw(self._img)
 
@@ -251,15 +255,7 @@ class FbDisplay:
         return self._img
 
     def update(self):
-        if self.output == "hdmi":
-            _get_hdmi().show(self._img)
-        elif self.output == "dual" and self.id == 3:
-            _get_fb1().show(self._img.crop((0, 0, W, H)))
-            _get_fb2().show(self._img.crop((W, 0, W * 2, H)))
-        elif self.output == "dual" and self.id == 1:
-            _get_fb1().show(self._img)
-        elif self.output == "dual":
-            _get_fb2().show(self._img)
+        _get_hdmi().show(self._img)
 
     def resume(self):
         """Re-abre el framebuffer si fue cerrado."""

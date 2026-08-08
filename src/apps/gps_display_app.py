@@ -48,11 +48,8 @@ class GPSDisplayApp:
     def __init__(self, input_mgr, state=None):
         self._input = input_mgr
         self._state = state
-        self._fb = FbDisplay(3, output="dual")  # las dos mini pantallas
-        self._map_fb = (
-            FbDisplay(1, output="hdmi", size=(640, 400))
-            if DISPLAY_MODE == "hdmi" else None
-        )
+        self._fb = FbDisplay(1, size=(640, 400))  # mapa a pantalla completa HDMI
+        self._map_fb = None
         self._running = False
         self._route_points = []
         self._zoom = MAP_ZOOM
@@ -100,9 +97,6 @@ class GPSDisplayApp:
 
         self._fb.blank()
         self._fb.update()
-        if self._map_fb:
-            self._map_fb.blank()
-            self._map_fb.update()
 
     def _render(self):
         gps = self._state.get_gps() if self._state else None
@@ -122,28 +116,13 @@ class GPSDisplayApp:
                 if len(self._route_points) > MAX_ROUTE_PTS:
                     self._route_points = self._route_points[-MAX_ROUTE_PTS:]
 
-        img_map  = self._render_map(gps, lat, lon, using_cache)
-        velo = self._state.get_esp32_velocimetro() if self._state else None
-        dire = self._state.get_esp32_direccionales() if self._state else None
-        inp = self._state.get_esp32_input() if self._state else None
-        img_data = self._render_data(gps, using_cache, velo, dire, inp)
-
-        if self._map_fb:
-            self._map_fb.image().paste(img_map, (0, 0))
-            self._map_fb.update()
-            img_status = self._render_mini_status(gps, velo, dire, inp)
-            full = self._fb.image()
-            full.paste(img_data, (0, 0))
-            full.paste(img_status, (320, 0))
-            self._fb.update()
-        else:
-            full = self._fb.image()
-            full.paste(img_map, (0, 0))
-            full.paste(img_data, (320, 0))
-            self._fb.update()
+        img_map = self._render_map(gps, lat, lon, using_cache)
+        full = self._fb.image()
+        full.paste(img_map, (0, 0))
+        self._fb.update()
 
     def _render_map(self, gps, lat, lon, using_cache) -> Image.Image:
-        W, H = (640, 400) if self._map_fb else (320, 240)
+        W, H = 640, 400
         if lat == 0 and lon == 0:
             return self._render_no_gps(W, H)
 

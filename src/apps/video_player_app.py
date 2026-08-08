@@ -442,7 +442,6 @@ class VideoPlayerApp:
         self._fb = FbDisplay(3)
         self._is_hdmi = _IS_HDMI
         self._raw_hdmi = _get_hdmi() if self._is_hdmi else None
-        self._info_fb = FbDisplay(3, output="dual") if self._is_hdmi else None
         self._running = False
         self.browser = FileBrowser()
         self.player = VideoPlayer(frame_sink=self._on_video_frame, raw=self._is_hdmi)
@@ -491,11 +490,6 @@ class VideoPlayerApp:
                 else:
                     path = self.browser.get_selected_path()
                     if path and os.path.exists(path):
-                        if self._is_hdmi:
-                            self._info_fb.blank()
-                            self._info_fb.update()
-                        else:
-                            _get_fb2().show(Image.new("RGB", (320, 240), (0, 0, 0)))
                         self.player.play(path)
                         self.browser.set_playing(self.browser.selected)
                         self.mode = 'playing'
@@ -602,23 +596,7 @@ class VideoPlayerApp:
             draw.text((7, 90 + i * 14), t, font=fs, fill=(100, 100, 120))
 
         draw.rectangle([(1, 1), (318, 238)], outline=(0, 150, 80), width=1)
-        if self._is_hdmi:
-            # Info en las dos mini pantallas; el video va aparte al HDMI.
-            fb = self._info_fb
-            fb.blank()
-            fb.image().paste(img, (0, 0))
-            desc = Image.new("RGB", (320, 240), (5, 5, 10))
-            dd = ImageDraw.Draw(desc)
-            dd.text((8, 8), "MOTO VIDEO", font=_find_font(18), fill=(0, 220, 255))
-            dd.text((8, 40), f"{os.path.basename(self.player.current_file or '')[:28]}",
-                    font=fs, fill=(160, 160, 180))
-            dd.text((8, 60), f"{pt} / {dt}  {pct}%", font=fs, fill=(200, 200, 200))
-            dd.text((8, 80), f"Vol: {self.player.volume}%", font=fs, fill=(180, 180, 200))
-            if self.player.is_paused:
-                dd.text((8, 110), "PAUSADO", font=_find_font(20), fill=(255, 200, 0))
-            fb.image().paste(desc, (320, 0))
-            fb.update()
-        else:
+        if not self._is_hdmi:
             _get_fb2().show(img)
 
     def _on_video_frame(self, data):
