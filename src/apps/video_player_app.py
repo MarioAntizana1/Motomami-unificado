@@ -272,48 +272,48 @@ class VideoPlayer:
         self._video_fps = 0.0
         self._scale_w = OUTPUT_W
         self._scale_h = OUTPUT_H
+
         try:
             r = subprocess.run(
-                ['ffprobe', '-v', 'error',
-                 '-show_entries', 'format=duration:stream=width,height,r_frame_rate',
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
                  '-of', 'default=noprint_wrappers=1:nokey=1', filepath],
-                capture_output=True, text=True, timeout=10)
+                capture_output=True, text=True, timeout=8)
             if r.returncode == 0 and r.stdout.strip():
-                lines = r.stdout.strip().split("\n")
-                if len(lines) >= 1 and lines[0].strip():
-                    self.duration = float(lines[0].strip())
-                if len(lines) >= 4 and lines[3].strip():
-                    frac = lines[3].strip()
-                    if '/' in frac:
-                        num, den = frac.split('/')
-                        if int(den) != 0:
-                            self._video_fps = float(num) / float(den)
-                    elif frac:
-                        self._video_fps = float(frac)
+                self.duration = float(r.stdout.strip())
         except Exception:
             pass
 
-        if self._is_hdmi:
-            info = self._probe_dimensions(filepath)
+        info = self._probe_stream_info(filepath)
+        if info:
             vw, vh = info.get("width", 0), info.get("height", 0)
-            if vw > 0 and vh > 0:
+            fps_str = info.get("r_frame_rate", "")
+            if '/' in fps_str:
+                num, den = fps_str.split('/')
+                if int(den) != 0:
+                    self._video_fps = float(num) / float(den)
+            elif fps_str:
+                self._video_fps = float(fps_str)
+
+            if self._raw and vw > 0 and vh > 0:
                 fill = min(OUTPUT_H * 0.72, float(vh))
                 ratio = vw / vh
                 self._scale_h = int(fill)
                 self._scale_w = min(int(fill * ratio), OUTPUT_W)
+
         self._frame_w, self._frame_h = OUTPUT_W, OUTPUT_H
 
-    def _probe_dimensions(self, filepath):
+    def _probe_stream_info(self, filepath):
         try:
             r = subprocess.run(
                 ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
-                 '-show_entries', 'stream=width,height',
+                 '-show_entries', 'stream=width,height,r_frame_rate',
                  '-of', 'csv=p=0', filepath],
                 capture_output=True, text=True, timeout=5)
-            if r.returncode == 0:
+            if r.returncode == 0 and r.stdout.strip():
                 parts = r.stdout.strip().split(',')
-                if len(parts) >= 2:
-                    return {"width": int(parts[0]), "height": int(parts[1])}
+                if len(parts) >= 3:
+                    return {"width": int(parts[0]), "height": int(parts[1]),
+                            "r_frame_rate": parts[2]}
         except Exception:
             pass
         return {}
