@@ -96,6 +96,13 @@ class DoomApp:
                     return r.stdout.strip()
             except Exception:
                 pass
+        # Fallback a rutas absolutas (el PATH del servicio no incluye /usr/games)
+        for p in ["/usr/games/crispy-doom", "/usr/bin/crispy-doom",
+                   "/usr/local/bin/crispy-doom",
+                   "/usr/games/chocolate-doom", "/usr/bin/chocolate-doom",
+                   "/usr/local/bin/chocolate-doom", "/usr/games/doom"]:
+            if os.path.exists(p):
+                return p
         return "crispy-doom"
 
     def _launch_doom(self):
