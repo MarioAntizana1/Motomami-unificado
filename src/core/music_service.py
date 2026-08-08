@@ -57,29 +57,47 @@ class MusicService:
         self._duration = 0.0
 
     def init(self):
-        """Inicializa pygame.mixer. Llamar una vez al arrancar."""
+        """Pre-carga pygame. El mixer solo se activa durante playback."""
+        import pygame
+        self._pygame = pygame
+        print("[Music] pygame listo (mixer bajo demanda)")
+
+    def _ensure_mixer(self):
+        """Activa el mixer solo cuando se necesita reproducir."""
+        if self._ok:
+            return True
         _free_audio_device()
         try:
-            import pygame
-            pygame.mixer.pre_init(
+            self._pygame.mixer.pre_init(
                 frequency=44100, size=-16, channels=2,
                 buffer=2048, allowedchanges=1
             )
-            pygame.mixer.init()
-            pygame.mixer.music.set_volume(self._volume / 100.0)
+            self._pygame.mixer.init()
+            self._pygame.mixer.music.set_volume(self._volume / 100.0)
             self._ok = True
-            print(f"[Music] Audio listo. Vol={self._volume}%")
+            return True
         except Exception as e:
-            print(f"[Music] Error init pygame: {e}")
+            print(f"[Music] Error init mixer: {e}")
+            return False
+
+    def _release_mixer(self):
+        """Suelta el dispositivo de audio para que otras apps lo usen."""
+        if not self._ok:
+            return
+        try:
+            self._pygame.mixer.music.stop()
+            self._pygame.mixer.quit()
+        except Exception:
+            pass
+        self._ok = False
 
     def play(self, filepath: str):
         with self._lock:
-            if not self._ok:
+            if not self._ensure_mixer():
                 return False
             try:
-                import pygame
-                pygame.mixer.music.load(filepath)
-                pygame.mixer.music.play()
+                self._pygame.mixer.music.load(filepath)
+                self._pygame.mixer.music.play()
                 self._current_file = filepath
                 self._is_playing = True
                 self._is_paused = False
@@ -108,11 +126,11 @@ class MusicService:
         with self._lock:
             if not self._ok:
                 return
-            import pygame
-            pygame.mixer.music.stop()
+            self._pygame.mixer.music.stop()
             self._is_playing = False
             self._is_paused = False
             self._update_state()
+            self._release_mixer()
 
     def seek(self, seconds: float):
         with self._lock:
