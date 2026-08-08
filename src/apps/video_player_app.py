@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 video_player_app.py - Reproductor de video con framebuffer nativo.
-Usa ffmpeg para extraer frames, ffplay para audio.
+Usa ffmpeg para extraer frames, audio por ffmpeg|aplay directo a ALSA.
 Estetica tomada de la version final/ (original).
 """
 import os
@@ -21,6 +21,12 @@ from libs.media_sources import discover_media_sources
 
 VIDEO_EXT = ('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v')
 VOLUME_STEP = 5
+AUDIO_DEVICE = "plughw:0,0"  # HDMI (card 0), evita el default roto por PipeWire
+
+if config_loader.DISPLAY_MODE == "hdmi":
+    VIDEO_W, VIDEO_H = 640, 400   # escala 2x exacta -> 1280x800 sin deformar
+else:
+    VIDEO_W, VIDEO_H = 320, 240
 
 SEARCH_FOLDERS = [
     config_loader.MOVIES_DIR,
@@ -152,7 +158,8 @@ class FileBrowser:
 class VideoPlayer:
     def __init__(self, frame_sink=None):
         self.ffmpeg_proc = None
-        self.ffplay_proc = None
+        self.audio_proc = None
+        self._audio_thread = None
         self.is_playing = False
         self.is_paused = False
         self.current_file = None
@@ -162,8 +169,8 @@ class VideoPlayer:
         self._running = False
         self._thread = None
         self._frame_sink = frame_sink
-        self._frame_w = 320
-        self._frame_h = 240
+        self._frame_w = VIDEO_W
+        self._frame_h = VIDEO_H
         self.target_fps = 10
         self._seek_offset = 0.0
 
@@ -180,28 +187,21 @@ class VideoPlayer:
             self.ffmpeg_proc = subprocess.Popen(
                 ['ffmpeg', '-v', 'error', '-re',
                  '-i', filepath,
-                 '-r', '10',
-                 '-vf', 'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2:black',
+                 '-r', f'{self.target_fps}',
+                 '-vf', (f'scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,'
+                         f'pad={VIDEO_W}:{VIDEO_H}:(ow-iw)/2:(oh-ih)/2:black'),
                  '-f', 'rawvideo',
                  '-pix_fmt', 'rgb24',
                  '-an', '-sn', '-'],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                bufsize=2048 * 2048,
+                bufsize=2048 * 1024,
             )
         except FileNotFoundError:
             print("[Video] ffmpeg no instalado")
             return False
 
-        try:
-            env = os.environ.copy()
-            self.ffplay_proc = subprocess.Popen(
-                ['ffplay', '-v', 'error', '-nodisp', '-autoexit', '-vn', '-sn',
-                 '-fflags', 'nobuffer', filepath],
-                env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-        except FileNotFoundError:
-            print("[Video] ffplay no disponible, solo video")
-            self.ffplay_proc = None
+        # Audio: ffmpeg decodifica y aplay escribe directo a ALSA (evita SDL/ffplay).
+        self._start_audio(filepath)
 
         self.is_playing = True
         self.is_paused = False
@@ -210,6 +210,48 @@ class VideoPlayer:
         self._thread = threading.Thread(target=self._render_loop, daemon=True)
         self._thread.start()
         return True
+
+    def _start_audio(self, filepath):
+        try:
+            self.audio_proc = subprocess.Popen(
+                ['ffmpeg', '-v', 'error', '-i', filepath,
+                 '-vn', '-sn', '-ac', '2', '-ar', '48000',
+                 '-f', 's16le', '-acodec', 'pcm_s16le', 'pipe:1'],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            self.audio_proc = None
+            return
+        try:
+            self._aplay_proc = subprocess.Popen(
+                ['aplay', '-D', AUDIO_DEVICE, '-r', '48000', '-c', '2',
+                 '-f', 'S16_LE', '-q'],
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            self.audio_proc.terminate()
+            self.audio_proc = None
+            return
+
+        def _pump():
+            try:
+                while True:
+                    chunk = self.audio_proc.stdout.read(65536)
+                    if not chunk:
+                        break
+                    self._aplay_proc.stdin.write(chunk)
+            except Exception:
+                pass
+            finally:
+                try:
+                    if self._aplay_proc and self._aplay_proc.stdin:
+                        self._aplay_proc.stdin.close()
+                except Exception:
+                    pass
+
+        self._audio_thread = threading.Thread(target=_pump, daemon=True)
+        self._audio_thread.start()
 
     def _analyze_video(self, filepath):
         try:
@@ -222,7 +264,7 @@ class VideoPlayer:
                 self.duration = float(r.stdout.strip())
         except Exception:
             self.duration = 0
-        self._frame_w, self._frame_h = 320, 240
+        self._frame_w, self._frame_h = VIDEO_W, VIDEO_H
 
     def _render_loop(self):
         proc = self.ffmpeg_proc
@@ -251,9 +293,9 @@ class VideoPlayer:
                 except Exception:
                     pass
                 frame_n += 1
-                self.position = self._seek_offset + frame_n / 10.0
+                self.position = self._seek_offset + frame_n / float(self.target_fps)
                 elapsed = time.time() - t0
-                target = frame_n / 10.0
+                target = frame_n / float(self.target_fps)
                 if elapsed < target:
                     time.sleep(target - elapsed)
                 if self.duration > 0 and self.position >= self.duration:
@@ -279,17 +321,29 @@ class VideoPlayer:
                     pass
             self.ffmpeg_proc = None
 
-    def _cleanup_ffplay(self):
-        if self.ffplay_proc:
+    def _cleanup_audio(self):
+        if self._audio_thread and self._audio_thread.is_alive():
+            self._audio_thread.join(timeout=2)
+        if self.audio_proc:
             try:
-                self.ffplay_proc.terminate()
-                self.ffplay_proc.wait(timeout=1)
+                self.audio_proc.terminate()
+                self.audio_proc.wait(timeout=1)
             except Exception:
                 try:
-                    self.ffplay_proc.kill()
+                    self.audio_proc.kill()
                 except Exception:
                     pass
-            self.ffplay_proc = None
+            self.audio_proc = None
+        if getattr(self, "_aplay_proc", None):
+            try:
+                self._aplay_proc.terminate()
+                self._aplay_proc.wait(timeout=1)
+            except Exception:
+                try:
+                    self._aplay_proc.kill()
+                except Exception:
+                    pass
+            self._aplay_proc = None
 
     def stop(self):
         self._running = False
@@ -301,16 +355,24 @@ class VideoPlayer:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=3)
         self._cleanup_ffmpeg()
-        self._cleanup_ffplay()
+        self._cleanup_audio()
         self.is_playing = False
         self.is_paused = False
         self.position = 0
 
     def pause(self):
         self.is_paused = not self.is_paused
+        try:
+            pct = 0 if self.is_paused else self.volume
+            subprocess.run(['amixer', '-c', '0', 'sset', 'PCM', f'{pct}%'],
+                           capture_output=True, timeout=1)
+        except Exception:
+            pass
 
     def set_volume(self, vol):
         self.volume = max(0, min(100, vol))
+        if self.is_paused:
+            return
         try:
             subprocess.run(['amixer', '-c', '0', 'sset', 'PCM', f'{self.volume}%'],
                            capture_output=True, timeout=1)
@@ -323,9 +385,14 @@ class VideoPlayerApp:
         self._input = input_mgr
         self._state = state
         self._fb = FbDisplay(3)
+        self._is_hdmi = config_loader.DISPLAY_MODE == "hdmi"
+        if self._is_hdmi:
+            self._video_fb = FbDisplay(1, output="hdmi", size=(VIDEO_W, VIDEO_H))
+            self._info_fb = FbDisplay(3, output="dual")
+        else:
+            self._video_fb = None
+            self._info_fb = None
         self._running = False
-        self._render_lock = threading.Lock()
-        self._last_video_frame = Image.new("RGB", (320, 240), (0, 0, 0))
         self.browser = FileBrowser()
         self.player = VideoPlayer(frame_sink=self._on_video_frame)
         self.mode = 'browser'
@@ -358,6 +425,9 @@ class VideoPlayerApp:
         self.player.stop()
         self._fb.blank()
         self._fb.update()
+        if self._video_fb:
+            self._video_fb.blank()
+            self._video_fb.update()
 
     def _handle_action(self, action):
         if self.mode == 'browser':
@@ -371,7 +441,10 @@ class VideoPlayerApp:
                 else:
                     path = self.browser.get_selected_path()
                     if path and os.path.exists(path):
-                        if config_loader.DISPLAY_MODE != "hdmi":
+                        if self._is_hdmi:
+                            self._info_fb.blank()
+                            self._info_fb.update()
+                        else:
                             _get_fb2().show(Image.new("RGB", (320, 240), (0, 0, 0)))
                         self.player.play(path)
                         self.browser.set_playing(self.browser.selected)
@@ -479,19 +552,33 @@ class VideoPlayerApp:
             draw.text((7, 90 + i * 14), t, font=fs, fill=(100, 100, 120))
 
         draw.rectangle([(1, 1), (318, 238)], outline=(0, 150, 80), width=1)
-        if config_loader.DISPLAY_MODE == "hdmi":
-            with self._render_lock:
-                self._fb.blank()
-                self._fb.image().paste(self._last_video_frame, (0, 0))
-                self._fb.image().paste(img, (320, 0))
-                self._fb.update()
+        if self._is_hdmi:
+            # Info en las dos mini pantallas; el video va aparte al HDMI.
+            fb = self._info_fb
+            fb.blank()
+            fb.image().paste(img, (0, 0))
+            desc = Image.new("RGB", (320, 240), (5, 5, 10))
+            dd = ImageDraw.Draw(desc)
+            dd.text((8, 8), "MOTO VIDEO", font=_find_font(18), fill=(0, 220, 255))
+            dd.text((8, 40), f"{os.path.basename(self.player.current_file or '')[:28]}",
+                    font=fs, fill=(160, 160, 180))
+            dd.text((8, 60), f"{pt} / {dt}  {pct}%", font=fs, fill=(200, 200, 200))
+            dd.text((8, 80), f"Vol: {self.player.volume}%", font=fs, fill=(180, 180, 200))
+            if self.player.is_paused:
+                dd.text((8, 110), "PAUSADO", font=_find_font(20), fill=(255, 200, 0))
+            fb.image().paste(desc, (320, 0))
+            fb.update()
         else:
             _get_fb2().show(img)
 
     def _on_video_frame(self, img):
-        """Recibe frames sin escribir un framebuffer equivocado en HDMI."""
-        if config_loader.DISPLAY_MODE != "hdmi":
+        """Frames de video: va directo al framebuffer activo, sin UI por frame."""
+        if not self._is_hdmi:
             _get_fb1().show(img)
             return
-        self._last_video_frame = img.copy()
-        self._render_playing_info()
+        fb = self._video_fb
+        try:
+            fb.image().paste(img, (0, 0))
+            fb.update()
+        except Exception:
+            pass
