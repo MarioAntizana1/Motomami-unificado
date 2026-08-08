@@ -25,10 +25,8 @@ AUDIO_DEVICE = "default"  # sigue /etc/asound.conf → card 0 (FiiO si conectado
 
 _IS_HDMI = config_loader.DISPLAY_MODE == "hdmi"
 if _IS_HDMI:
-    SCALE_W, SCALE_H = 960, 600       # area donde se escala el video (sin deformar)
     OUTPUT_W, OUTPUT_H = 1280, 800    # tamano real del framebuffer (con relleno negro)
 else:
-    SCALE_W, SCALE_H = 320, 240
     OUTPUT_W, OUTPUT_H = 320, 240
 
 SEARCH_FOLDERS = [
@@ -174,6 +172,9 @@ class VideoPlayer:
         self._thread = None
         self._frame_sink = frame_sink
         self._raw = raw
+        self._scale_w = OUTPUT_W
+        self._scale_h = OUTPUT_H
+        self._video_fps = 0.0
         self._frame_w = OUTPUT_W
         self._frame_h = OUTPUT_H
         self._frame_bytes = OUTPUT_W * OUTPUT_H * (2 if raw else 3)
@@ -188,6 +189,10 @@ class VideoPlayer:
         self.duration = 0.0
         self.position = 0.0
         self._analyze_video(filepath)
+        if self._video_fps > 0:
+            self.target_fps = int(min(self._video_fps, 24))
+        else:
+            self.target_fps = 12
 
         pix_fmt = 'rgb565le' if self._raw else 'rgb24'
         try:
@@ -195,7 +200,7 @@ class VideoPlayer:
                 ['ffmpeg', '-v', 'error',
                  '-i', filepath,
                  '-r', f'{self.target_fps}',
-                 '-vf', (f'scale={SCALE_W}:{SCALE_H}:force_original_aspect_ratio=decrease,'
+                 '-vf', (f'scale={self._scale_w}:{self._scale_h}:force_original_aspect_ratio=decrease,'
                          f'pad={OUTPUT_W}:{OUTPUT_H}:(ow-iw)/2:(oh-ih)/2:black'),
                  '-f', 'rawvideo',
                  '-pix_fmt', pix_fmt,
@@ -262,17 +267,56 @@ class VideoPlayer:
         self._audio_thread.start()
 
     def _analyze_video(self, filepath):
+        """Extrae duracion, FPS y dimensiones del video para adaptar output."""
+        self.duration = 0.0
+        self._video_fps = 0.0
+        self._scale_w = OUTPUT_W
+        self._scale_h = OUTPUT_H
         try:
             r = subprocess.run(
                 ['ffprobe', '-v', 'error',
-                 '-show_entries', 'format=duration',
+                 '-show_entries', 'format=duration:stream=width,height,r_frame_rate',
                  '-of', 'default=noprint_wrappers=1:nokey=1', filepath],
                 capture_output=True, text=True, timeout=10)
             if r.returncode == 0 and r.stdout.strip():
-                self.duration = float(r.stdout.strip())
+                lines = r.stdout.strip().split("\n")
+                if len(lines) >= 1 and lines[0].strip():
+                    self.duration = float(lines[0].strip())
+                if len(lines) >= 4 and lines[3].strip():
+                    frac = lines[3].strip()
+                    if '/' in frac:
+                        num, den = frac.split('/')
+                        if int(den) != 0:
+                            self._video_fps = float(num) / float(den)
+                    elif frac:
+                        self._video_fps = float(frac)
         except Exception:
-            self.duration = 0
-        self._frame_w, self._frame_h = VIDEO_W, VIDEO_H
+            pass
+
+        if self._is_hdmi:
+            info = self._probe_dimensions(filepath)
+            vw, vh = info.get("width", 0), info.get("height", 0)
+            if vw > 0 and vh > 0:
+                fill = min(OUTPUT_H * 0.72, float(vh))
+                ratio = vw / vh
+                self._scale_h = int(fill)
+                self._scale_w = min(int(fill * ratio), OUTPUT_W)
+        self._frame_w, self._frame_h = OUTPUT_W, OUTPUT_H
+
+    def _probe_dimensions(self, filepath):
+        try:
+            r = subprocess.run(
+                ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                 '-show_entries', 'stream=width,height',
+                 '-of', 'csv=p=0', filepath],
+                capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                parts = r.stdout.strip().split(',')
+                if len(parts) >= 2:
+                    return {"width": int(parts[0]), "height": int(parts[1])}
+        except Exception:
+            pass
+        return {}
 
     def _render_loop(self):
         proc = self.ffmpeg_proc
