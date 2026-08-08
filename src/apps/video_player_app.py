@@ -25,9 +25,11 @@ AUDIO_DEVICE = "default"  # sigue /etc/asound.conf → card 0 (FiiO si conectado
 
 _IS_HDMI = config_loader.DISPLAY_MODE == "hdmi"
 if _IS_HDMI:
-    VIDEO_W, VIDEO_H = 1280, 800   # resolucion nativa del fb HDMI (sin rescale)
+    SCALE_W, SCALE_H = 960, 600       # area donde se escala el video (sin deformar)
+    OUTPUT_W, OUTPUT_H = 1280, 800    # tamano real del framebuffer (con relleno negro)
 else:
-    VIDEO_W, VIDEO_H = 320, 240
+    SCALE_W, SCALE_H = 320, 240
+    OUTPUT_W, OUTPUT_H = 320, 240
 
 SEARCH_FOLDERS = [
     config_loader.MOVIES_DIR,
@@ -172,9 +174,9 @@ class VideoPlayer:
         self._thread = None
         self._frame_sink = frame_sink
         self._raw = raw
-        self._frame_w = VIDEO_W
-        self._frame_h = VIDEO_H
-        self._frame_bytes = VIDEO_W * VIDEO_H * (2 if raw else 3)
+        self._frame_w = OUTPUT_W
+        self._frame_h = OUTPUT_H
+        self._frame_bytes = OUTPUT_W * OUTPUT_H * (2 if raw else 3)
         self.target_fps = 12
         self._seek_offset = 0.0
 
@@ -193,8 +195,8 @@ class VideoPlayer:
                 ['ffmpeg', '-v', 'error',
                  '-i', filepath,
                  '-r', f'{self.target_fps}',
-                 '-vf', (f'scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,'
-                         f'pad={VIDEO_W}:{VIDEO_H}:(ow-iw)/2:(oh-ih)/2:black'),
+                 '-vf', (f'scale={SCALE_W}:{SCALE_H}:force_original_aspect_ratio=decrease,'
+                         f'pad={OUTPUT_W}:{OUTPUT_H}:(ow-iw)/2:(oh-ih)/2:black'),
                  '-f', 'rawvideo',
                  '-pix_fmt', pix_fmt,
                  '-an', '-sn', '-'],
