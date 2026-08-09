@@ -41,6 +41,7 @@ h3{color:#e94560;margin:8px 0 4px;font-size:12px}
   <button onclick="addComponent('rect')">+ Rectángulo</button>
   <button onclick="addComponent('grid')">+ Cuadrícula</button>
   <button onclick="addComponent('label')">+ Etiqueta</button>
+  <button onclick="addComponent('image')">+ Imagen</button>
   <br><br>
   <button onclick="duplicateSelected()">📋 Duplicar selec.</button>
   <button onclick="deleteSelected()" style="background:#600">✕ Eliminar selec.</button>
@@ -145,6 +146,7 @@ function addComponent(type) {
   else if (type==='grid') { c.cols=3; c.cell_w=190; c.cell_h=85; c.gap=8; c.offsetX=0; c.offsetY=0;
     c.items=[]; for(let i=0;i<6;i++) c.items.push({icon:'X',label:'Item'+(i+1),color:[100,200,255],action:''}); }
   else if (type==='label') { c.text='Etiqueta'; c.size=12; c.color=[200,200,200]; c.bg=[0,0,0,0]; }
+  else if (type==='image') { c.src=''; c.w=100; c.h=100; }
   scr().components.push(c);
   selectedIdx = scr().components.length - 1;
   rebuildCompList();
@@ -336,8 +338,22 @@ canvas.addEventListener('mousemove', e => {
       c.x = dragOrig.x + dragOrig.w - nw;
       c.w = nw;
       c.h = Math.max(10, dragOrig.h + dy);
+}
+    } else if (c.type === 'image') {
+      ctx.fillStyle = 'rgba(20,20,40,0.8)';
+      ctx.fillRect(c.x, c.y, c.w||100, c.h||100);
+      ctx.strokeStyle = '#448';
+      ctx.strokeRect(c.x, c.y, c.w||100, c.h||100);
+      ctx.fillStyle = '#88f';
+      ctx.font = '12px monospace';
+      ctx.fillText('IMG', c.x+10, c.y+24);
+      if (c.src) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '9px monospace';
+        let name = c.src.split('/').pop().substring(0,20);
+        ctx.fillText(name, c.x+4, c.y+(c.h||100)-4);
+      }
     }
-  }
   redraw();
 });
 
@@ -393,9 +409,14 @@ function buildProps() {
   let html = '<h3>'+c.type.toUpperCase()+'</h3>';
   html += '<label>X <input type="number" value="'+c.x+'" oninput="updateProp(\'x\',this.value)"></label>';
   html += '<label>Y <input type="number" value="'+c.y+'" oninput="updateProp(\'y\',this.value)"></label>';
-  if (c.type==='rect'||c.type==='label') {
+  if (c.type==='rect'||c.type==='label'||c.type==='image') {
     html += '<label>W <input type="number" value="'+(c.w||100)+'" oninput="updateProp(\'w\',this.value)"></label>';
     html += '<label>H <input type="number" value="'+(c.h||30)+'" oninput="updateProp(\'h\',this.value)"></label>';
+  }
+  if (c.type==='image') {
+    html += '<label>Archivo <input value="'+(c.src||'')+'" oninput="updateProp(\'src\',this.value)" placeholder="img/logo.png"></label>';
+    html += '<label style="color:#8af">Las imágenes van en /home/motomami/moto/img/</label>';
+    html += '<button onclick="pickImage()" style="width:100%;margin-top:4px">📁 Seleccionar archivo local</button>';
   }
   if (c.type==='rect') {
     html += '<label>Color relleno <div class="row">R<input type="number" value="'+(c.fill?c.fill[0]:40)+'" oninput="updateProp(\'fill.0\',this.value)">G<input type="number" value="'+(c.fill?c.fill[1]:40)+'" oninput="updateProp(\'fill.1\',this.value)">B<input type="number" value="'+(c.fill?c.fill[2]:60)+'" oninput="updateProp(\'fill.2\',this.value)"></div></label>';
@@ -443,6 +464,13 @@ function save() {
   localStorage.setItem('motomami_ui', JSON.stringify(data));
   rebuildCompList();
   buildProps();
+}
+
+function pickImage() {
+  if (selectedIdx<0) return;
+  let c = scr().components[selectedIdx];
+  let name = prompt('Ruta de la imagen en la RPi:\nej: /home/motomami/moto/img/logo.png\nej: img/doom_bg.jpg', c.src || 'img/');
+  if (name) { c.src = name; redraw(); save(); buildProps(); }
 }
 
 function exportJSON() {

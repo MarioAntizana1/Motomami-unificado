@@ -50,6 +50,23 @@ class JsonUI:
                 font = _find_font(comp.get("size", 14))
                 d.text((x, y), txt, font=font, fill=tuple(c[:3]))
 
+            elif t == "image":
+                src = comp.get("src", "")
+                w, h = comp.get("w", 100), comp.get("h", 100)
+                if src and os.path.exists(src):
+                    try:
+                        pil_img = Image.open(src).convert("RGB")
+                        pil_img = pil_img.resize((w, h))
+                        img.paste(pil_img, (x, y))
+                    except Exception:
+                        d.rectangle([(x, y), (x + w - 1, y + h - 1)],
+                                     fill=(20, 20, 40), outline=(60, 60, 80))
+                        d.text((x + 4, y + 4), "IMG?", font=_find_font(10), fill=(150, 150, 150))
+                else:
+                    d.rectangle([(x, y), (x + w - 1, y + h - 1)],
+                                 fill=(20, 20, 40), outline=(60, 60, 80))
+                    d.text((x + 4, y + 4), "IMG", font=_find_font(10), fill=(150, 150, 150))
+
             elif t == "label":
                 txt = self._resolve(comp.get("text", ""))
                 c = comp.get("color", [200, 200, 200])
