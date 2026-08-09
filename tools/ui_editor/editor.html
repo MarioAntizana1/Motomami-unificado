@@ -60,74 +60,13 @@ h3{color:#e94560;margin:8px 0 4px;font-size:12px}
 <script>
 const CW=640,CH=400;
 let data,current,selIdx=-1,drag=null,dStart=null,dOrig=null;
-let imgCache={}, propTimer=null, db=null;
+let imgCache={}, propTimer=null;
 
 function S(){return data.screens[current];}
 function C(i){return S().components[i!=null?i:selIdx];}
 
-// IndexedDB para imágenes (localStorage no aguanta base64 grandes)
-function openDB(){
-  return new Promise((resolve,reject)=>{
-    let req=indexedDB.open('MotoMamiUI',1);
-    req.onupgradeneeded=e=>{e.target.result.createObjectStore('images');};
-    req.onsuccess=e=>{db=e.target.result;resolve(db);};
-    req.onerror=()=>reject(req.error);
-  });
-}
-
-function saveImages(){
-  if(!db)return;
-  let tx=db.transaction('images','readwrite'),store=tx.objectStore('images');
-  store.clear();
-  for(let sn in data.screens){
-    data.screens[sn].components.forEach(c=>{
-      if(c.type==='image'&&c._data)store.put({data:c._data},c.src);
-    });
-  });
-}
-
-function loadImages(){
-  return new Promise(resolve=>{
-    if(!db){resolve();return;}
-    let tx=db.transaction('images','readonly'),store=tx.objectStore('images');
-    let req=store.getAll();
-    req.onsuccess=()=>{
-      let items=req.result;
-      let count=0;
-      for(let sn in data.screens){
-        data.screens[sn].components.forEach(c=>{
-          if(c.type==='image'&&c.src){
-            let found=items.find(it=>it.data);
-            if(found){c._data=found.data;count++;}
-          }
-        });
-      }
-      // También obtener por clave
-      let keysReq=store.getAllKeys();
-      keysReq.onsuccess=()=>{
-        let keys=keysReq.result;
-        let valsReq=store.getAll();
-        valsReq.onsuccess=()=>{
-          let vals=valsReq.result;
-          keys.forEach((k,i)=>{
-            for(let sn in data.screens){
-              data.screens[sn].components.forEach(c=>{
-                if(c.type==='image'&&c.src===k&&!c._data)c._data=vals[i]?vals[i].data:null;
-              });
-            }
-          });
-          resolve();
-        };
-      };
-    };
-    req.onerror=()=>resolve();
-  });
-}
-
-async function init(){
-  // IndexedDB opcional: si falla, el editor funciona igual (solo sin persistir imagenes)
-  try { await openDB(); } catch(e) { console.warn('IndexedDB no disponible, imagenes no persisten'); db=null; }
-  let s=localStorage.getItem('motomami_ui_v2c');
+function init(){
+  let s=localStorage.getItem('motomami_ui_v2');
   if(s)try{data=JSON.parse(s)}catch(e){}
   if(!data||!data.screens||!Object.keys(data.screens).length){
     data={screens:{"main_menu":{bg:[10,0,10],components:[
@@ -149,10 +88,11 @@ async function init(){
       ]}
     ]}}};
   }
-  await loadImages().catch(()=>{});
   current=Object.keys(data.screens)[0];
   selIdx=-1;
-  rebuildScreenList();rebuildCompList();redraw();
+  rebuildScreenList();
+  rebuildCompList();
+  redraw();
 }
 
 function rebuildScreenList(){
@@ -485,14 +425,7 @@ function onImgPicked(e){
 }
 
 // ------- IO --------
-function save(){
-  let clean=JSON.parse(JSON.stringify(data));
-  for(let sn in clean.screens){
-    clean.screens[sn].components.forEach(c=>{if(c._data)delete c._data;});
-  }
-  localStorage.setItem('motomami_ui_v2c',JSON.stringify(clean));
-  try { saveImages(); } catch(e) {}
-}
+function save(){localStorage.setItem('motomami_ui_v2',JSON.stringify(data));}
 
 function exportJSON(){
   let clean=JSON.parse(JSON.stringify(data));
