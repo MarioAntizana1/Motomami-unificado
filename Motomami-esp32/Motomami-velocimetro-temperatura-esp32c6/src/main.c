@@ -230,7 +230,7 @@ static float current_speed_kmh(void)
     }
 
     const int64_t effective_period = elapsed > period ? elapsed : period;
-    return (distance_per_pulse_m * 3600000000.0f) / (float)effective_period;
+    return (distance_per_pulse_m * 3600000.0f) / (float)effective_period;
 }
 
 static void publish_data(void)
