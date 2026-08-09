@@ -125,8 +125,9 @@ function loadImages(){
 }
 
 async function init(){
-  await openDB();
-  let s=localStorage.getItem('motomami_ui_v2b');
+  // IndexedDB opcional: si falla, el editor funciona igual (solo sin persistir imagenes)
+  try { await openDB(); } catch(e) { console.warn('IndexedDB no disponible, imagenes no persisten'); db=null; }
+  let s=localStorage.getItem('motomami_ui_v2c');
   if(s)try{data=JSON.parse(s)}catch(e){}
   if(!data||!data.screens||!Object.keys(data.screens).length){
     data={screens:{"main_menu":{bg:[10,0,10],components:[
@@ -148,7 +149,7 @@ async function init(){
       ]}
     ]}}};
   }
-  await loadImages();
+  await loadImages().catch(()=>{});
   current=Object.keys(data.screens)[0];
   selIdx=-1;
   rebuildScreenList();rebuildCompList();redraw();
@@ -485,14 +486,12 @@ function onImgPicked(e){
 
 // ------- IO --------
 function save(){
-  // Guardar layout a localStorage (sin _data para no exceder límite)
   let clean=JSON.parse(JSON.stringify(data));
   for(let sn in clean.screens){
     clean.screens[sn].components.forEach(c=>{if(c._data)delete c._data;});
   }
-  localStorage.setItem('motomami_ui_v2b',JSON.stringify(clean));
-  // Guardar imágenes a IndexedDB
-  saveImages();
+  localStorage.setItem('motomami_ui_v2c',JSON.stringify(clean));
+  try { saveImages(); } catch(e) {}
 }
 
 function exportJSON(){
