@@ -1,0 +1,49 @@
+{
+  "screens": {
+    "main_menu": {
+      "bg": [10, 0, 10],
+      "components": [
+        {"type": "rect", "x": 0, "y": 0, "w": 640, "h": 34, "fill": [20, 20, 35]},
+        {"type": "text", "x": 16, "y": 6, "text": "MotoMami", "size": 20, "color": [255, 255, 255]},
+        {"type": "label", "x": 560, "y": 8, "text": "$page", "size": 11, "color": [120, 120, 140]},
+        {"type": "grid", "x": 13, "y": 50, "cols": 3, "cell_w": 198, "cell_h": 82, "gap": 8, "offsetX": 0, "offsetY": 0, "items": [
+          {"icon": "GPS", "label": "GPS", "color": [100, 255, 100], "action": "gps"},
+          {"icon": "MUS", "label": "Musica", "color": [200, 100, 255], "action": "music"},
+          {"icon": "VID", "label": "Video", "color": [255, 200, 50], "action": "video"},
+          {"icon": "CAM", "label": "Camara", "color": [255, 100, 100], "action": "camera"},
+          {"icon": "DOOM", "label": "Doom", "color": [255, 50, 50], "action": "doom"},
+          {"icon": "DIA", "label": "GPS Diag", "color": [0, 255, 80], "action": "gps_diag"},
+          {"icon": "NET", "label": "Conexiones", "color": [80, 180, 255], "action": "conex"},
+          {"icon": "BT", "label": "Bluetooth", "color": [180, 80, 255], "action": "bt_mgr"},
+          {"icon": "TLM", "label": "Telemetria", "color": [50, 200, 255], "action": "telem"},
+          {"icon": "MQT", "label": "MQTT", "color": [0, 200, 255], "action": "mqtt"},
+          {"icon": "TEMA", "label": "Tema", "color": [255, 220, 100], "action": "theme"},
+          {"icon": "X", "label": "SALIR", "color": [150, 150, 150], "action": "exit"}
+        ]}
+      ]
+    },
+    "video_player": {
+      "bg": [0, 0, 8],
+      "components": [
+        {"type": "rect", "x": 0, "y": 0, "w": 640, "h": 28, "fill": [0, 40, 60]},
+        {"type": "text", "x": 8, "y": 4, "text": "VIDEOS", "size": 16, "color": [0, 200, 255]},
+        {"type": "label", "x": 4, "y": 370, "text": "ENTER=Reprod  BACK=Volver  UP/DOWN=Vol", "size": 11, "color": [80, 80, 100]}
+      ]
+    },
+    "music_player": {
+      "bg": [0, 0, 8],
+      "components": [
+        {"type": "rect", "x": 0, "y": 0, "w": 640, "h": 28, "fill": [80, 20, 120]},
+        {"type": "text", "x": 8, "y": 4, "text": "MUSICA", "size": 16, "color": [255, 255, 255]}
+      ]
+    },
+    "doom_menu": {
+      "bg": [10, 0, 0],
+      "components": [
+        {"type": "rect", "x": 0, "y": 0, "w": 640, "h": 50, "fill": [60, 0, 0]},
+        {"type": "text", "x": 20, "y": 10, "text": "CRISPY DOOM", "size": 24, "color": [255, 50, 50]},
+        {"type": "label", "x": 20, "y": 70, "text": "Selecciona WAD:", "size": 14, "color": [200, 200, 200]}
+      ]
+    }
+  }
+}

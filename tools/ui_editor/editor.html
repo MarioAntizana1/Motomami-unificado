@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>MotoMami UI Editor</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:13px monospace;background:#1a1a2e;color:#eee;display:flex;height:100vh}
+.sidebar{width:260px;background:#16213e;padding:10px;overflow-y:auto;border-right:2px solid #0f3460}
+.main{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px}
+canvas{border:2px solid #0f3460;background:#000;image-rendering:pixelated}
+.toolbar{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.toolbar button,.sidebar button{padding:6px 10px;background:#0f3460;color:#fff;border:none;cursor:pointer;border-radius:4px;font:12px monospace}
+.toolbar button:hover,.sidebar button:hover{background:#1a5276}
+.toolbar button.active{background:#e94560}
+.props{margin-top:8px}
+.props label{display:block;margin-top:4px;font-size:11px;color:#aaa}
+.props input,.props select{width:100%;padding:4px;margin-top:2px;background:#0f3460;color:#fff;border:1px solid #333;border-radius:3px}
+.props input[type=color]{height:28px;padding:0;width:40px}
+.props .row{display:flex;gap:4px}
+.props .row input{flex:1}
+h3{color:#e94560;margin:8px 0 4px;font-size:12px}
+.comp-list{max-height:200px;overflow-y:auto}
+.comp-item{padding:4px;margin:2px 0;background:#0f3460;cursor:pointer;border-radius:3px;font-size:11px}
+.comp-item.selected{background:#e94560}
+.comp-item .del{float:right;color:#f66;cursor:pointer;font-weight:bold}
+#screens{margin-bottom:6px}
+#screens select{width:100%;padding:4px;background:#0f3460;color:#fff;border:1px solid #333}
+</style>
+</head>
+<body>
+<div class="sidebar">
+  <h3>PANTALLAS</h3>
+  <div id="screens">
+    <select id="screenSelect" onchange="switchScreen()"></select>
+    <button onclick="newScreen()" style="width:100%;margin-top:4px">+ Nueva</button>
+    <button onclick="deleteScreen()" style="width:100%;margin-top:2px;background:#600">✕ Eliminar</button>
+  </div>
+  <h3>COMPONENTES</h3>
+  <button onclick="addComponent('text')">+ Texto</button>
+  <button onclick="addComponent('rect')">+ Rectángulo</button>
+  <button onclick="addComponent('grid')">+ Cuadrícula</button>
+  <button onclick="addComponent('label')">+ Etiqueta</button>
+  <br><br>
+  <button onclick="duplicateSelected()">📋 Duplicar selec.</button>
+  <button onclick="deleteSelected()" style="background:#600">✕ Eliminar selec.</button>
+  <h3>LISTA</h3>
+  <div class="comp-list" id="compList"></div>
+  <h3>PROPIEDADES</h3>
+  <div class="props" id="props"></div>
+</div>
+<div class="main">
+  <div class="toolbar">
+    <button onclick="exportJSON()">⬇ Exportar JSON</button>
+    <button onclick="importJSON()">⬆ Importar JSON</button>
+    <button onclick="resetScreen()">🗑 Limpiar pantalla</button>
+    <span style="color:#aaa;margin-left:10px;line-height:28px" id="info"></span>
+  </div>
+  <canvas id="c" width="640" height="400"></canvas>
+  <p style="color:#555;margin-top:4px;font-size:11px">Click=seleccionar | Arrastrar=mover | Shift+arrastrar=redimensionar</p>
+</div>
+<script>
+const CANVAS_W = 640, CANVAS_H = 400;
+
+let data = { screens: {} };
+let currentScreen = "main_menu";
+let selectedIdx = -1;
+let dragComp = null;
+let dragStart = null;
+let dragOrig = null;
+
+function mkDefault() {
+  data = { screens: { "main_menu": { bg: [10,0,10], components: [] } } };
+  currentScreen = "main_menu";
+  selectedIdx = -1;
+}
+
+function scr() { return data.screens[currentScreen]; }
+
+function init() {
+  let saved = localStorage.getItem('motomami_ui');
+  if (saved) { try { data = JSON.parse(saved); } catch(e){} }
+  if (!data.screens || Object.keys(data.screens).length===0) mkDefault();
+  if (!data.screens[currentScreen]) currentScreen = Object.keys(data.screens)[0];
+  rebuildScreenList();
+  redraw();
+}
+
+function rebuildScreenList() {
+  let sel = document.getElementById('screenSelect');
+  sel.innerHTML = '';
+  Object.keys(data.screens).forEach(k => {
+    let o = document.createElement('option');
+    o.value = k; o.textContent = k;
+    if (k===currentScreen) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function switchScreen() {
+  currentScreen = document.getElementById('screenSelect').value;
+  selectedIdx = -1;
+  rebuildCompList();
+  redraw();
+}
+
+function newScreen() {
+  let name = prompt('Nombre de pantalla (ej: music_player):');
+  if (!name) return;
+  if (data.screens[name]) { alert('Ya existe'); return; }
+  data.screens[name] = { bg: [0,0,8], components: [] };
+  currentScreen = name;
+  selectedIdx = -1;
+  rebuildScreenList();
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+function deleteScreen() {
+  if (Object.keys(data.screens).length <= 1) { alert('No puedes borrar la única pantalla'); return; }
+  if (!confirm('Borrar pantalla "'+currentScreen+'"?')) return;
+  delete data.screens[currentScreen];
+  currentScreen = Object.keys(data.screens)[0];
+  selectedIdx = -1;
+  rebuildScreenList();
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+function resetScreen() {
+  if (!confirm('Limpiar todos los componentes de "'+currentScreen+'"?')) return;
+  scr().components = [];
+  selectedIdx = -1;
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+function addComponent(type) {
+  let c = {type, x:40, y:40, w:100, h:30};
+  if (type==='text') { c.text='Texto'; c.size=14; c.color=[255,255,255]; }
+  else if (type==='rect') { c.fill=[40,40,60]; c.outline=null; }
+  else if (type==='grid') { c.cols=3; c.cell_w=190; c.cell_h=85; c.gap=8; c.offsetX=0; c.offsetY=0;
+    c.items=[]; for(let i=0;i<6;i++) c.items.push({icon:'X',label:'Item'+(i+1),color:[100,200,255],action:''}); }
+  else if (type==='label') { c.text='Etiqueta'; c.size=12; c.color=[200,200,200]; c.bg=[0,0,0,0]; }
+  scr().components.push(c);
+  selectedIdx = scr().components.length - 1;
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+function duplicateSelected() {
+  if (selectedIdx<0) return;
+  let c = JSON.parse(JSON.stringify(scr().components[selectedIdx]));
+  scr().components.splice(selectedIdx+1, 0, c);
+  selectedIdx++;
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+function deleteSelected() {
+  if (selectedIdx<0) return;
+  scr().components.splice(selectedIdx, 1);
+  selectedIdx = Math.min(selectedIdx, scr().components.length-1);
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+function rebuildCompList() {
+  let el = document.getElementById('compList');
+  el.innerHTML = '';
+  scr().components.forEach((c,i) => {
+    let d = document.createElement('div');
+    d.className = 'comp-item' + (i===selectedIdx?' selected':'');
+    let label = c.type + (c.text ? ': '+c.text.substring(0,15) : '');
+    if (c.type==='grid') label = 'grid: '+c.items.length+' items';
+    d.innerHTML = label + '<span class="del" onclick="event.stopPropagation();deleteComp('+i+')">✕</span>';
+    d.onclick = () => { selectedIdx = i; rebuildCompList(); redraw(); };
+    el.appendChild(d);
+  });
+}
+
+function deleteComp(i) {
+  scr().components.splice(i, 1);
+  if (selectedIdx >= scr().components.length) selectedIdx = scr().components.length - 1;
+  rebuildCompList();
+  redraw();
+  save();
+}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let scale = 1;
+let ox = 0, oy = 0;
+
+function resizeCanvas() {
+  let availW = canvas.parentElement.clientWidth - 20;
+  let availH = canvas.parentElement.clientHeight - 80;
+  scale = Math.min(availW/CANVAS_W, availH/CANVAS_H, 1.8);
+  canvas.style.width = (CANVAS_W*scale)+'px';
+  canvas.style.height = (CANVAS_H*scale)+'px';
+}
+
+function redraw() {
+  resizeCanvas();
+  let s = scr();
+  let bg = s.bg || [0,0,0];
+  ctx.fillStyle = 'rgb('+bg.join(',')+')';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+  s.components.forEach((c, i) => {
+    ctx.save();
+    if (c.type === 'rect') {
+      let f = c.fill || [40,40,60];
+      ctx.fillStyle = 'rgb('+f.join(',')+')';
+      ctx.fillRect(c.x, c.y, c.w, c.h);
+      if (c.outline) {
+        ctx.strokeStyle = 'rgb('+c.outline.join(',')+')';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(c.x, c.y, c.w, c.h);
+      }
+    } else if (c.type === 'text') {
+      let clr = c.color || [255,255,255];
+      ctx.fillStyle = 'rgb('+clr.join(',')+')';
+      ctx.font = (c.size||14) + 'px monospace';
+      ctx.fillText(c.text||'', c.x, c.y + (c.size||14));
+    } else if (c.type === 'label') {
+      if (c.bg && c.bg.length>=3 && (c.bg[3]||0)>0) {
+        ctx.fillStyle = 'rgba('+c.bg.join(',')+')';
+        ctx.fillRect(c.x, c.y, c.w, c.h);
+      }
+      ctx.fillStyle = 'rgb('+(c.color||[200,200,200]).join(',')+')';
+      ctx.font = (c.size||12) + 'px monospace';
+      ctx.fillText(c.text||'', c.x, c.y + (c.size||12));
+    } else if (c.type === 'grid') {
+      let cols = c.cols, cw = c.cell_w, ch = c.cell_h, gap = c.gap;
+      c.items.forEach((item, j) => {
+        let row = Math.floor(j/cols), col = j%cols;
+        let gx = c.x + c.offsetX + col*(cw+gap);
+        let gy = c.y + c.offsetY + row*(ch+gap);
+        // cell bg
+        ctx.fillStyle = j===c._sel ? 'rgba(35,35,55,1)' : 'rgba(15,15,28,1)';
+        ctx.fillRect(gx, gy, cw, ch);
+        ctx.strokeStyle = j===c._sel ? 'rgb(255,255,100)' : 'rgba(40,40,55,1)';
+        ctx.lineWidth = j===c._sel ? 2 : 1;
+        ctx.strokeRect(gx, gy, cw, ch);
+        // icon circle
+        let cx = gx + cw/2, cy = gy + 30, r = 15;
+        ctx.fillStyle = 'rgb('+(item.color||[100,200,255]).join(',')+')';
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = '11px monospace';
+        let tw = ctx.measureText(item.icon||'').width;
+        ctx.fillText(item.icon||'', cx-tw/2, cy+4);
+        // label
+        ctx.fillStyle = '#ddd';
+        ctx.font = '11px monospace';
+        let lw = ctx.measureText(item.label||'').width;
+        ctx.fillText(item.label||'', gx+(cw-lw)/2, gy+60);
+      });
+    }
+
+    // highlight selected
+    if (i === selectedIdx) {
+      ctx.strokeStyle = '#e94560';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4,2]);
+      ctx.strokeRect(c.x-2, c.y-2, (c.w||100)+4, (c.h||30)+4);
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  });
+
+  // grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  for (let x=0; x<CANVAS_W; x+=20) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CANVAS_H); ctx.stroke(); }
+  for (let y=0; y<CANVAS_H; y+=20) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CANVAS_W,y); ctx.stroke(); }
+
+  document.getElementById('info').textContent = 'Pantalla: '+currentScreen+' | Componentes: '+scr().components.length+' | Zoom: '+(scale*100).toFixed(0)+'%';
+}
+
+// Mouse handling
+canvas.addEventListener('mousedown', e => {
+  let rect = canvas.getBoundingClientRect();
+  let mx = Math.round((e.clientX - rect.left) / scale);
+  let my = Math.round((e.clientY - rect.top) / scale);
+
+  // find component under cursor (topmost first)
+  let found = -1;
+  for (let i = scr().components.length-1; i>=0; i--) {
+    let c = scr().components[i];
+    let w = c.w || (c.tx?c.tx:100), h = c.h || 30;
+    if (mx>=c.x && mx<=c.x+w && my>=c.y && my<=c.y+h) { found = i; break; }
+  }
+  if (found >= 0) {
+    selectedIdx = found;
+    rebuildCompList();
+    redraw();
+    if (e.shiftKey) {
+      // find which edge is closest
+      let c = scr().components[found];
+      dragComp = { idx: found, mode: 'resize', edge: mx < c.x+c.w/2 ? 'l' : 'r' };
+    } else {
+      dragComp = { idx: found, mode: 'move' };
+    }
+    dragStart = { x: mx, y: my };
+    dragOrig = { x: scr().components[found].x, y: scr().components[found].y, w: scr().components[found].w, h: scr().components[found].h };
+  }
+  e.preventDefault();
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!dragComp) return;
+  let rect = canvas.getBoundingClientRect();
+  let mx = Math.round((e.clientX - rect.left) / scale);
+  let my = Math.round((e.clientY - rect.top) / scale);
+  let dx = mx - dragStart.x;
+  let dy = my - dragStart.y;
+  let c = scr().components[dragComp.idx];
+
+  if (dragComp.mode === 'move') {
+    c.x = Math.max(0, Math.min(CANVAS_W-10, dragOrig.x + dx));
+    c.y = Math.max(0, Math.min(CANVAS_H-10, dragOrig.y + dy));
+  } else if (dragComp.mode === 'resize') {
+    if (dragComp.edge === 'r') {
+      c.w = Math.max(20, dragOrig.w + dx);
+      c.h = Math.max(10, dragOrig.h + dy);
+    } else {
+      let nw = Math.max(20, dragOrig.w - dx);
+      c.x = dragOrig.x + dragOrig.w - nw;
+      c.w = nw;
+      c.h = Math.max(10, dragOrig.h + dy);
+    }
+  }
+  redraw();
+});
+
+canvas.addEventListener('mouseup', () => {
+  if (dragComp) { save(); redraw(); }
+  dragComp = null;
+});
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.key === 'Delete' && selectedIdx>=0) {
+    deleteSelected();
+    e.preventDefault();
+  }
+  if (e.key === 'ArrowUp' && selectedIdx>=0 && !e.shiftKey) {
+    scr().components[selectedIdx].y -= 1; redraw(); save();
+  }
+  if (e.key === 'ArrowDown' && selectedIdx>=0 && !e.shiftKey) {
+    scr().components[selectedIdx].y += 1; redraw(); save();
+  }
+  if (e.key === 'ArrowLeft' && selectedIdx>=0 && !e.shiftKey) {
+    scr().components[selectedIdx].x -= 1; redraw(); save();
+  }
+  if (e.key === 'ArrowRight' && selectedIdx>=0 && !e.shiftKey) {
+    scr().components[selectedIdx].x += 1; redraw(); save();
+  }
+});
+
+let _updateTimer = null;
+function updateProp(key, value) {
+  if (selectedIdx<0) return;
+  let c = scr().components[selectedIdx];
+  let parts = key.split('.');
+  if (parts.length > 1) {
+    // nested update e.g. fill.0
+    let arr = c[parts[0]];
+    arr = arr || [];
+    arr[parseInt(parts[1])] = parseFloat(value);
+    c[parts[0]] = arr;
+  } else {
+    if (key==='text' || key==='icon' || key==='label' || key==='action') c[key] = value;
+    else if (['x','y','w','h','cols','cell_w','cell_h','gap','size','offsetX','offsetY'].includes(key)) c[key] = parseInt(value)||0;
+  }
+  redraw();
+  if (_updateTimer) clearTimeout(_updateTimer);
+  _updateTimer = setTimeout(save, 300);
+}
+
+function buildProps() {
+  let el = document.getElementById('props');
+  if (selectedIdx<0) { el.innerHTML = '<p style="color:#555">Selecciona un componente</p>'; return; }
+  let c = scr().components[selectedIdx];
+  let html = '<h3>'+c.type.toUpperCase()+'</h3>';
+  html += '<label>X <input type="number" value="'+c.x+'" oninput="updateProp(\'x\',this.value)"></label>';
+  html += '<label>Y <input type="number" value="'+c.y+'" oninput="updateProp(\'y\',this.value)"></label>';
+  if (c.type==='rect'||c.type==='label') {
+    html += '<label>W <input type="number" value="'+(c.w||100)+'" oninput="updateProp(\'w\',this.value)"></label>';
+    html += '<label>H <input type="number" value="'+(c.h||30)+'" oninput="updateProp(\'h\',this.value)"></label>';
+  }
+  if (c.type==='rect') {
+    html += '<label>Color relleno <div class="row">R<input type="number" value="'+(c.fill?c.fill[0]:40)+'" oninput="updateProp(\'fill.0\',this.value)">G<input type="number" value="'+(c.fill?c.fill[1]:40)+'" oninput="updateProp(\'fill.1\',this.value)">B<input type="number" value="'+(c.fill?c.fill[2]:60)+'" oninput="updateProp(\'fill.2\',this.value)"></div></label>';
+  }
+  if (c.type==='text'||c.type==='label') {
+    html += '<label>Texto <input value="'+(c.text||'').replace(/"/g,'&quot;')+'" oninput="updateProp(\'text\',this.value)"></label>';
+    html += '<label>Tamaño <input type="number" value="'+(c.size||14)+'" oninput="updateProp(\'size\',this.value)"></label>';
+    html += '<label>Color <div class="row">R<input type="number" value="'+(c.color?c.color[0]:255)+'" oninput="updateProp(\'color.0\',this.value)">G<input type="number" value="'+(c.color?c.color[1]:255)+'" oninput="updateProp(\'color.1\',this.value)">B<input type="number" value="'+(c.color?c.color[2]:255)+'" oninput="updateProp(\'color.2\',this.value)"></div></label>';
+  }
+  if (c.type==='grid') {
+    html += '<label>Columnas <input type="number" value="'+c.cols+'" oninput="updateProp(\'cols\',this.value)"></label>';
+    html += '<label>Ancho celda <input type="number" value="'+c.cell_w+'" oninput="updateProp(\'cell_w\',this.value)"></label>';
+    html += '<label>Alto celda <input type="number" value="'+c.cell_h+'" oninput="updateProp(\'cell_h\',this.value)"></label>';
+    html += '<label>Espacio <input type="number" value="'+c.gap+'" oninput="updateProp(\'gap\',this.value)"></label>';
+    html += '<h3>ITEMS ('+c.items.length+')</h3>';
+    html += '<button onclick="addGridItem()" style="width:100%">+ Item</button>';
+    c.items.forEach((item,j) => {
+      html += '<div class="comp-item" style="margin:2px 0;padding:4px">'+j+': <input value="'+(item.icon||'')+'" style="width:30px" oninput="updateGridItem('+j+',\'icon\',this.value)"> <input value="'+(item.label||'')+'" style="width:60px" oninput="updateGridItem('+j+',\'label\',this.value)"> <input value="'+(item.action||'')+'" style="width:50px" oninput="updateGridItem('+j+',\'action\',this.value)" placeholder="action"><span class="del" onclick="delGridItem('+j+')">✕</span></div>';
+    });
+  }
+  el.innerHTML = html;
+}
+
+function addGridItem() {
+  if (selectedIdx<0) return;
+  let c = scr().components[selectedIdx];
+  if (c.type!=='grid') return;
+  c.items.push({icon:'X',label:'Nuevo',color:[100,200,255],action:''});
+  redraw(); save(); buildProps();
+}
+
+function updateGridItem(j, key, val) {
+  let c = scr().components[selectedIdx];
+  c.items[j][key] = val;
+  redraw(); save();
+}
+
+function delGridItem(j) {
+  let c = scr().components[selectedIdx];
+  c.items.splice(j,1);
+  redraw(); save(); buildProps();
+}
+
+function save() {
+  localStorage.setItem('motomami_ui', JSON.stringify(data));
+  rebuildCompList();
+  buildProps();
+}
+
+function exportJSON() {
+  let json = JSON.stringify(data, null, 2);
+  let blob = new Blob([json], {type:'application/json'});
+  let a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'motomami_ui.json';
+  a.click();
+}
+
+function importJSON() {
+  let input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    let f = e.target.files[0];
+    if (!f) return;
+    let reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        data = JSON.parse(ev.target.result);
+        if (!data.screens) { alert('Formato inválido'); return; }
+        currentScreen = Object.keys(data.screens)[0];
+        selectedIdx = -1;
+        rebuildScreenList();
+        rebuildCompList();
+        redraw();
+        save();
+      } catch(ex) { alert('JSON inválido: '+ex.message); }
+    };
+    reader.readAsText(f);
+  };
+  input.click();
+}
+
+window.addEventListener('load', init);
+window.addEventListener('resize', redraw);
+</script>
+</body>
+</html>
