@@ -36,7 +36,7 @@ GPS_AT_PORT   = _cfg.get("gps", "at_port",  fallback="/dev/ttyUSB2")
 GPS_NMEA_PORT = _cfg.get("gps", "nmea_port", fallback="/dev/ttyUSB1")
 GPS_BAUD      = _cfg.getint("gps", "baud",  fallback=115200)
 MAP_ZOOM      = _cfg.getint("gps", "map_zoom", fallback=16)
-MAX_ROUTE_PTS = _cfg.getint("gps", "max_route_points", fallback=50)
+MAX_ROUTE_PTS = _cfg.getint("gps", "max_route_points", fallback=5000)
 GPS_DISTANCE_FILE = _cfg.get("gps", "distance_file", fallback="/home/motomami/moto/data/gps_distance.json")
 
 # ── Rutas ──
