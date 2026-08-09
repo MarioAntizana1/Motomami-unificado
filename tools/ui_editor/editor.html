@@ -5,48 +5,45 @@
 <title>MotoMami UI Editor</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font:13px monospace;background:#1a1a2e;color:#eee;display:flex;height:100vh}
-.sidebar{width:260px;background:#16213e;padding:10px;overflow-y:auto;border-right:2px solid #0f3460}
+body{font:12px monospace;background:#1a1a2e;color:#eee;display:flex;height:100vh}
+.sidebar{width:270px;background:#16213e;padding:8px;overflow-y:auto;border-right:2px solid #0f3460}
 .main{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px}
 canvas{border:2px solid #0f3460;background:#000;image-rendering:pixelated}
-.toolbar{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
-.toolbar button,.sidebar button{padding:6px 10px;background:#0f3460;color:#fff;border:none;cursor:pointer;border-radius:4px;font:12px monospace}
-.toolbar button:hover,.sidebar button:hover{background:#1a5276}
-.toolbar button.active{background:#e94560}
-.props{margin-top:8px}
-.props label{display:block;margin-top:4px;font-size:11px;color:#aaa}
-.props input,.props select{width:100%;padding:4px;margin-top:2px;background:#0f3460;color:#fff;border:1px solid #333;border-radius:3px}
-.props input[type=color]{height:28px;padding:0;width:40px}
-.props .row{display:flex;gap:4px}
-.props .row input{flex:1}
+button{padding:5px 8px;background:#0f3460;color:#fff;border:none;cursor:pointer;border-radius:3px;font:11px monospace;margin:2px 0}
+button:hover{background:#1a5276}
+button.danger{background:#600}
+button.danger:hover{background:#900}
+.props input,.props select{width:100%;padding:3px;margin-top:2px;background:#0f3460;color:#fff;border:1px solid #333;border-radius:2px}
+.props input[type=number]{width:48px}
+.props .row{display:flex;gap:4px;align-items:center}
+.props .row span{color:#888;font-size:10px}
+.props label{display:block;margin-top:4px;font-size:10px;color:#aaa}
 h3{color:#e94560;margin:8px 0 4px;font-size:12px}
-.comp-list{max-height:200px;overflow-y:auto}
-.comp-item{padding:4px;margin:2px 0;background:#0f3460;cursor:pointer;border-radius:3px;font-size:11px}
+.comp-item{padding:3px 5px;margin:2px 0;background:#0f3460;cursor:pointer;border-radius:3px;font-size:10px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
 .comp-item.selected{background:#e94560}
-.comp-item .del{float:right;color:#f66;cursor:pointer;font-weight:bold}
-#screens{margin-bottom:6px}
+.comp-item input{width:35px!important;padding:1px!important;font-size:10px!important}
+.comp-item .del{margin-left:auto;color:#f66;cursor:pointer;font-weight:bold}
 #screens select{width:100%;padding:4px;background:#0f3460;color:#fff;border:1px solid #333}
+.toolbar{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap}
 </style>
 </head>
 <body>
 <div class="sidebar">
   <h3>PANTALLAS</h3>
-  <div id="screens">
-    <select id="screenSelect" onchange="switchScreen()"></select>
-    <button onclick="newScreen()" style="width:100%;margin-top:4px">+ Nueva</button>
-    <button onclick="deleteScreen()" style="width:100%;margin-top:2px;background:#600">✕ Eliminar</button>
-  </div>
+  <div id="screens"><select id="screenSel" onchange="switchScreen()"></select></div>
+  <button onclick="newScreen()">+ Nueva pantalla</button>
+  <button class="danger" onclick="deleteScreen()">✕ Eliminar</button>
+  <h3>AÑADIR COMPONENTE</h3>
+  <button onclick="addComp('rect')">Rectángulo</button>
+  <button onclick="addComp('text')">Texto</button>
+  <button onclick="addComp('label')">Etiqueta</button>
+  <button onclick="addComp('grid')">Cuadrícula</button>
+  <button onclick="addComp('image')">Imagen</button>
+  <button onclick="addComp('button')">Botón</button>
   <h3>COMPONENTES</h3>
-  <button onclick="addComponent('text')">+ Texto</button>
-  <button onclick="addComponent('rect')">+ Rectángulo</button>
-  <button onclick="addComponent('grid')">+ Cuadrícula</button>
-  <button onclick="addComponent('label')">+ Etiqueta</button>
-  <button onclick="addComponent('image')">+ Imagen</button>
-  <br><br>
-  <button onclick="duplicateSelected()">📋 Duplicar selec.</button>
-  <button onclick="deleteSelected()" style="background:#600">✕ Eliminar selec.</button>
-  <h3>LISTA</h3>
-  <div class="comp-list" id="compList"></div>
+  <div id="compList"></div>
+  <button onclick="dupComp()">📋 Duplicar</button>
+  <button class="danger" onclick="delComp()">✕ Eliminar</button>
   <h3>PROPIEDADES</h3>
   <div class="props" id="props"></div>
 </div>
@@ -54,499 +51,431 @@ h3{color:#e94560;margin:8px 0 4px;font-size:12px}
   <div class="toolbar">
     <button onclick="exportJSON()">⬇ Exportar JSON</button>
     <button onclick="importJSON()">⬆ Importar JSON</button>
-    <button onclick="resetScreen()">🗑 Limpiar pantalla</button>
-    <span style="color:#aaa;margin-left:10px;line-height:28px" id="info"></span>
+    <button class="danger" onclick="resetScreen()">🗑 Limpiar</button>
+    <span style="color:#888;line-height:28px;font-size:11px" id="info"></span>
   </div>
   <canvas id="c" width="640" height="400"></canvas>
-  <p style="color:#555;margin-top:4px;font-size:11px">Click=seleccionar | Arrastrar=mover | Shift+arrastrar=redimensionar</p>
+  <p style="color:#555;font-size:10px;margin-top:4px">Click=seleccionar | Arrastrar=mover | Shift+arrastrar=redimensionar | Supr=eliminar | Flechas=mover 1px</p>
 </div>
 <script>
-const CANVAS_W = 640, CANVAS_H = 400;
+const CW=640,CH=400;
+let data,current,selIdx=-1,drag=null,dStart=null,dOrig=null;
+let imgCache={}, propTimer=null;
 
-let data = { screens: {} };
-let currentScreen = "main_menu";
-let selectedIdx = -1;
-let dragComp = null;
-let dragStart = null;
-let dragOrig = null;
+function S(){return data.screens[current];}
+function C(i){return S().components[i!=null?i:selIdx];}
 
-function mkDefault() {
-  data = { screens: { "main_menu": { bg: [10,0,10], components: [] } } };
-  currentScreen = "main_menu";
-  selectedIdx = -1;
-}
-
-function scr() { return data.screens[currentScreen]; }
-
-function init() {
-  let saved = localStorage.getItem('motomami_ui');
-  if (saved) { try { data = JSON.parse(saved); } catch(e){} }
-  if (!data.screens || Object.keys(data.screens).length===0) mkDefault();
-  if (!data.screens[currentScreen]) currentScreen = Object.keys(data.screens)[0];
+function init(){
+  let s=localStorage.getItem('motomami_ui_v2');
+  if(s)try{data=JSON.parse(s)}catch(e){}
+  if(!data||!data.screens||!Object.keys(data.screens).length){
+    data={screens:{"main_menu":{bg:[10,0,10],components:[
+      {type:"rect",x:0,y:0,w:640,h:34,fill:[20,20,35]},
+      {type:"text",x:16,y:6,text:"MotoMami",size:20,color:[255,255,255]},
+      {type:"grid",x:13,y:50,cols:3,cell_w:198,cell_h:82,gap:8,items:[
+        {icon:"GPS",label:"GPS",color:[100,255,100],action:"gps"},
+        {icon:"MUS",label:"Musica",color:[200,100,255],action:"music"},
+        {icon:"VID",label:"Video",color:[255,200,50],action:"video"},
+        {icon:"CAM",label:"Camara",color:[255,100,100],action:"camera"},
+        {icon:"DOOM",label:"Doom",color:[255,50,50],action:"doom"},
+        {icon:"DIA",label:"GPS Diag",color:[0,255,80],action:"gps_diag"},
+        {icon:"NET",label:"Conexiones",color:[80,180,255],action:"conex"},
+        {icon:"BT",label:"Bluetooth",color:[180,80,255],action:"bt_mgr"},
+        {icon:"TLM",label:"Telemetria",color:[50,200,255],action:"telem"},
+        {icon:"MQT",label:"MQTT",color:[0,200,255],action:"mqtt"},
+        {icon:"TEMA",label:"Tema",color:[255,220,100],action:"theme"},
+        {icon:"X",label:"SALIR",color:[150,150,150],action:"exit"}
+      ]}
+    ]}}};
+  }
+  current=Object.keys(data.screens)[0];
+  selIdx=-1;
   rebuildScreenList();
+  rebuildCompList();
   redraw();
 }
 
-function rebuildScreenList() {
-  let sel = document.getElementById('screenSelect');
-  sel.innerHTML = '';
-  Object.keys(data.screens).forEach(k => {
-    let o = document.createElement('option');
-    o.value = k; o.textContent = k;
-    if (k===currentScreen) o.selected = true;
-    sel.appendChild(o);
+function rebuildScreenList(){
+  let s=document.getElementById('screenSel');
+  s.innerHTML='';
+  Object.keys(data.screens).forEach(k=>{
+    let o=document.createElement('option');
+    o.value=k;o.textContent=k;
+    if(k===current)o.selected=true;
+    s.appendChild(o);
   });
 }
 
-function switchScreen() {
-  currentScreen = document.getElementById('screenSelect').value;
-  selectedIdx = -1;
+function switchScreen(){
+  current=document.getElementById('screenSel').value;
+  selIdx=-1;
   rebuildCompList();
   redraw();
 }
 
-function newScreen() {
-  let name = prompt('Nombre de pantalla (ej: music_player):');
-  if (!name) return;
-  if (data.screens[name]) { alert('Ya existe'); return; }
-  data.screens[name] = { bg: [0,0,8], components: [] };
-  currentScreen = name;
-  selectedIdx = -1;
-  rebuildScreenList();
-  rebuildCompList();
-  redraw();
-  save();
+function newScreen(){
+  let n=prompt('Nombre (ej: gps):');
+  if(!n)return;
+  if(data.screens[n]){alert('Ya existe');return;}
+  data.screens[n]={bg:[0,0,8],components:[]};
+  current=n;selIdx=-1;
+  rebuildScreenList();rebuildCompList();redraw();save();
 }
 
-function deleteScreen() {
-  if (Object.keys(data.screens).length <= 1) { alert('No puedes borrar la única pantalla'); return; }
-  if (!confirm('Borrar pantalla "'+currentScreen+'"?')) return;
-  delete data.screens[currentScreen];
-  currentScreen = Object.keys(data.screens)[0];
-  selectedIdx = -1;
-  rebuildScreenList();
-  rebuildCompList();
-  redraw();
-  save();
+function deleteScreen(){
+  if(Object.keys(data.screens).length<=1){alert('No puedes borrar la unica pantalla');return;}
+  if(!confirm('Borrar "'+current+'"?'))return;
+  delete data.screens[current];
+  current=Object.keys(data.screens)[0];selIdx=-1;
+  rebuildScreenList();rebuildCompList();redraw();save();
 }
 
-function resetScreen() {
-  if (!confirm('Limpiar todos los componentes de "'+currentScreen+'"?')) return;
-  scr().components = [];
-  selectedIdx = -1;
-  rebuildCompList();
-  redraw();
-  save();
+function resetScreen(){
+  if(!confirm('Limpiar todos los componentes de "'+current+'"?'))return;
+  S().components=[];selIdx=-1;
+  rebuildCompList();redraw();save();
 }
 
-function addComponent(type) {
-  let c = {type, x:40, y:40, w:100, h:30};
-  if (type==='text') { c.text='Texto'; c.size=14; c.color=[255,255,255]; }
-  else if (type==='rect') { c.fill=[40,40,60]; c.outline=null; }
-  else if (type==='grid') { c.cols=3; c.cell_w=190; c.cell_h=85; c.gap=8; c.offsetX=0; c.offsetY=0;
-    c.items=[]; for(let i=0;i<6;i++) c.items.push({icon:'X',label:'Item'+(i+1),color:[100,200,255],action:''}); }
-  else if (type==='label') { c.text='Etiqueta'; c.size=12; c.color=[200,200,200]; c.bg=[0,0,0,0]; }
-  else if (type==='image') { c.src=''; c.w=100; c.h=100; }
-  scr().components.push(c);
-  selectedIdx = scr().components.length - 1;
-  rebuildCompList();
-  redraw();
-  save();
+function addComp(type){
+  let c={type,x:40,y:40};
+  if(type==='rect'){c.w=100;c.h=30;c.fill=[40,40,60];}
+  else if(type==='text'){c.text='Texto';c.size=14;c.color=[255,255,255];}
+  else if(type==='label'){c.text='Label';c.size=12;c.color=[200,200,200];c.w=0;c.h=0;c.bg=[0,0,0,0];}
+  else if(type==='grid'){c.cols=3;c.cell_w=190;c.cell_h=85;c.gap=8;c.offsetX=0;c.offsetY=0;c.items=[];for(let i=0;i<6;i++)c.items.push({icon:'X',label:'Item'+(i+1),color:[100,200,255],action:''});}
+  else if(type==='image'){c.src='';c.w=100;c.h=100;}
+  else if(type==='button'){c.text='OK';c.w=120;c.h=36;c.color=[0,150,255];c.action='';c.size=14;}
+  S().components.push(c);
+  selIdx=S().components.length-1;
+  rebuildCompList();redraw();save();buildProps();
 }
 
-function duplicateSelected() {
-  if (selectedIdx<0) return;
-  let c = JSON.parse(JSON.stringify(scr().components[selectedIdx]));
-  scr().components.splice(selectedIdx+1, 0, c);
-  selectedIdx++;
-  rebuildCompList();
-  redraw();
-  save();
+function dupComp(){
+  if(selIdx<0)return;
+  let c=JSON.parse(JSON.stringify(C()));
+  S().components.splice(selIdx+1,0,c);
+  selIdx++;
+  rebuildCompList();redraw();save();buildProps();
 }
 
-function deleteSelected() {
-  if (selectedIdx<0) return;
-  scr().components.splice(selectedIdx, 1);
-  selectedIdx = Math.min(selectedIdx, scr().components.length-1);
-  rebuildCompList();
-  redraw();
-  save();
+function delComp(){
+  if(selIdx<0)return;
+  S().components.splice(selIdx,1);
+  selIdx=Math.min(selIdx,S().components.length-1);
+  rebuildCompList();redraw();save();buildProps();
 }
 
-function rebuildCompList() {
-  let el = document.getElementById('compList');
-  el.innerHTML = '';
-  scr().components.forEach((c,i) => {
-    let d = document.createElement('div');
-    d.className = 'comp-item' + (i===selectedIdx?' selected':'');
-    let label = c.type + (c.text ? ': '+c.text.substring(0,15) : '');
-    if (c.type==='grid') label = 'grid: '+c.items.length+' items';
-    d.innerHTML = label + '<span class="del" onclick="event.stopPropagation();deleteComp('+i+')">✕</span>';
-    d.onclick = () => { selectedIdx = i; rebuildCompList(); redraw(); };
+function rebuildCompList(){
+  let el=document.getElementById('compList');
+  el.innerHTML='';
+  S().components.forEach((c,i)=>{
+    let d=document.createElement('div');
+    d.className='comp-item'+(i===selIdx?' selected':'');
+    let label=c.type+': '+(c.text||c.src||(c.type==='grid'?c.items.length+' items':''));
+    d.innerHTML='<span>'+label.substring(0,25)+'</span><span class="del">&times;</span>';
+    d.querySelector('.del').onclick=e=>{e.stopPropagation();delCompIdx(i);};
+    d.onclick=()=>{selIdx=i;rebuildCompList();redraw();buildProps();};
     el.appendChild(d);
   });
 }
 
-function deleteComp(i) {
-  scr().components.splice(i, 1);
-  if (selectedIdx >= scr().components.length) selectedIdx = scr().components.length - 1;
-  rebuildCompList();
-  redraw();
-  save();
+function delCompIdx(i){
+  S().components.splice(i,1);
+  if(selIdx>=S().components.length)selIdx=S().components.length-1;
+  rebuildCompList();redraw();save();buildProps();
 }
 
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-let scale = 1;
-let ox = 0, oy = 0;
+// ------- CANVAS --------
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let scale=1;
 
-function resizeCanvas() {
-  let availW = canvas.parentElement.clientWidth - 20;
-  let availH = canvas.parentElement.clientHeight - 80;
-  scale = Math.min(availW/CANVAS_W, availH/CANVAS_H, 1.8);
-  canvas.style.width = (CANVAS_W*scale)+'px';
-  canvas.style.height = (CANVAS_H*scale)+'px';
+function resizeCanvas(){
+  let aw=canvas.parentElement.clientWidth-20;
+  let ah=canvas.parentElement.clientHeight-80;
+  scale=Math.min(aw/CW,ah/CH,1.8);
+  canvas.style.width=(CW*scale)+'px';
+  canvas.style.height=(CH*scale)+'px';
 }
 
-function redraw() {
+function redraw(){
   resizeCanvas();
-  let s = scr();
-  let bg = s.bg || [0,0,0];
-  ctx.fillStyle = 'rgb('+bg.join(',')+')';
-  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  let s=S();
+  ctx.fillStyle='rgb('+(s.bg||[0,0,0]).join(',')+')';
+  ctx.fillRect(0,0,CW,CH);
 
-  s.components.forEach((c, i) => {
+  s.components.forEach((c,i)=>{
+    let x=c.x||0,y=c.y||0,w=c.w||100,h=c.h||30;
     ctx.save();
-    if (c.type === 'rect') {
-      let f = c.fill || [40,40,60];
-      ctx.fillStyle = 'rgb('+f.join(',')+')';
-      ctx.fillRect(c.x, c.y, c.w, c.h);
-      if (c.outline) {
-        ctx.strokeStyle = 'rgb('+c.outline.join(',')+')';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(c.x, c.y, c.w, c.h);
-      }
-    } else if (c.type === 'text') {
-      let clr = c.color || [255,255,255];
-      ctx.fillStyle = 'rgb('+clr.join(',')+')';
-      ctx.font = (c.size||14) + 'px monospace';
-      ctx.fillText(c.text||'', c.x, c.y + (c.size||14));
-    } else if (c.type === 'label') {
-      if (c.bg && c.bg.length>=3 && (c.bg[3]||0)>0) {
-        ctx.fillStyle = 'rgba('+c.bg.join(',')+')';
-        ctx.fillRect(c.x, c.y, c.w, c.h);
-      }
-      ctx.fillStyle = 'rgb('+(c.color||[200,200,200]).join(',')+')';
-      ctx.font = (c.size||12) + 'px monospace';
-      ctx.fillText(c.text||'', c.x, c.y + (c.size||12));
-    } else if (c.type === 'grid') {
-      let cols = c.cols, cw = c.cell_w, ch = c.cell_h, gap = c.gap;
-      c.items.forEach((item, j) => {
-        let row = Math.floor(j/cols), col = j%cols;
-        let gx = c.x + c.offsetX + col*(cw+gap);
-        let gy = c.y + c.offsetY + row*(ch+gap);
-        // cell bg
-        ctx.fillStyle = j===c._sel ? 'rgba(35,35,55,1)' : 'rgba(15,15,28,1)';
-        ctx.fillRect(gx, gy, cw, ch);
-        ctx.strokeStyle = j===c._sel ? 'rgb(255,255,100)' : 'rgba(40,40,55,1)';
-        ctx.lineWidth = j===c._sel ? 2 : 1;
-        ctx.strokeRect(gx, gy, cw, ch);
+
+    if(c.type==='rect'){
+      ctx.fillStyle='rgb('+(c.fill||[40,40,60]).join(',')+')';
+      ctx.fillRect(x,y,w,h);
+      if(c.outline){ctx.strokeStyle='rgb('+c.outline.join(',')+')';ctx.lineWidth=2;ctx.strokeRect(x,y,w,h);}
+    }
+    else if(c.type==='text'){
+      ctx.fillStyle='rgb('+(c.color||[255,255,255]).join(',')+')';
+      ctx.font=(c.size||14)+'px monospace';
+      ctx.fillText(c.text||'',x,y+(c.size||14));
+    }
+    else if(c.type==='label'){
+      if(c.w>0&&c.h>0&&c.bg){ctx.fillStyle='rgba('+c.bg.join(',')+')';ctx.fillRect(x,y,c.w,c.h);}
+      ctx.fillStyle='rgb('+(c.color||[200,200,200]).join(',')+')';
+      ctx.font=(c.size||12)+'px monospace';
+      ctx.fillText(c.text||'',x,y+(c.size||12));
+    }
+    else if(c.type==='grid'){
+      let cols=c.cols,cw=c.cell_w,ch=c.cell_h,gap=c.gap,ox=c.offsetX||0,oy=c.offsetY||0;
+      c.items.forEach((item,j)=>{
+        let row=Math.floor(j/cols),col=j%cols;
+        let gx=x+ox+col*(cw+gap),gy=y+oy+row*(ch+gap);
+        ctx.fillStyle=j===c._selIdx?'rgba(35,35,55,1)':'rgba(15,15,28,1)';
+        ctx.fillRect(gx,gy,cw,ch);
+        ctx.strokeStyle=j===c._selIdx?'rgb(255,255,100)':'rgba(40,40,55,1)';
+        ctx.lineWidth=j===c._selIdx?2:1;
+        ctx.strokeRect(gx,gy,cw,ch);
         // icon circle
-        let cx = gx + cw/2, cy = gy + 30, r = 15;
-        ctx.fillStyle = 'rgb('+(item.color||[100,200,255]).join(',')+')';
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.font = '11px monospace';
-        let tw = ctx.measureText(item.icon||'').width;
-        ctx.fillText(item.icon||'', cx-tw/2, cy+4);
-        // label
-        ctx.fillStyle = '#ddd';
-        ctx.font = '11px monospace';
-        let lw = ctx.measureText(item.label||'').width;
-        ctx.fillText(item.label||'', gx+(cw-lw)/2, gy+60);
+        let cx=gx+cw/2,cy=gy+30,r=15;
+        let ic=item.color||[100,200,255];
+        ctx.fillStyle='rgb('+ic.join(',')+')';
+        ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#fff';ctx.font='11px monospace';
+        let iw=ctx.measureText(item.icon||'').width;
+        ctx.fillText(item.icon||'',cx-iw/2,cy+4);
+        ctx.fillStyle='#ddd';
+        let lw=ctx.measureText(item.label||'').width;
+        ctx.fillText(item.label||'',gx+(cw-lw)/2,gy+58);
       });
     }
+    else if(c.type==='image'){
+      let cached=imgCache[c.src];
+      if(cached&&cached.complete&&cached.naturalWidth>0){
+        ctx.drawImage(cached,x,y,w,h);
+      }else{
+        ctx.fillStyle='rgba(20,20,40,0.8)';ctx.fillRect(x,y,w,h);
+        ctx.strokeStyle='#448';ctx.lineWidth=1;ctx.strokeRect(x,y,w,h);
+        ctx.fillStyle='#88f';ctx.font='11px monospace';ctx.fillText('IMG',x+4,y+18);
+        if(c.src){ctx.fillStyle='#aaa';ctx.font='9px monospace';ctx.fillText(c.src.split('/').pop().substring(0,18),x+4,y+h-4);}
+      }
+    }
+    else if(c.type==='button'){
+      let clr=c.color||[0,150,255];
+      ctx.fillStyle='rgb('+clr.join(',')+')';
+      ctx.fillRect(x,y,w,h);
+      ctx.fillStyle='#fff';ctx.font=(c.size||14)+'px monospace';
+      let txt=c.text||'OK';
+      let tw=ctx.measureText(txt).width;
+      ctx.fillText(txt,x+(w-tw)/2,y+h/2+5);
+    }
 
-    // highlight selected
-    if (i === selectedIdx) {
-      ctx.strokeStyle = '#e94560';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4,2]);
-      ctx.strokeRect(c.x-2, c.y-2, (c.w||100)+4, (c.h||30)+4);
-      ctx.setLineDash([]);
+    if(i===selIdx){
+      ctx.strokeStyle='#e94560';ctx.lineWidth=2;
+      ctx.setLineDash([4,2]);ctx.strokeRect(x-2,y-2,w+4,h+4);ctx.setLineDash([]);
     }
     ctx.restore();
   });
 
-  // grid
-  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-  ctx.lineWidth = 1;
-  for (let x=0; x<CANVAS_W; x+=20) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,CANVAS_H); ctx.stroke(); }
-  for (let y=0; y<CANVAS_H; y+=20) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(CANVAS_W,y); ctx.stroke(); }
+  // grid overlay
+  ctx.strokeStyle='rgba(255,255,255,0.03)';ctx.lineWidth=1;
+  for(let x=0;x<CW;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,CH);ctx.stroke();}
+  for(let y=0;y<CH;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(CW,y);ctx.stroke();}
 
-  document.getElementById('info').textContent = 'Pantalla: '+currentScreen+' | Componentes: '+scr().components.length+' | Zoom: '+(scale*100).toFixed(0)+'%';
+  document.getElementById('info').textContent='Pantalla: '+current+' | '+S().components.length+' comps | Zoom: '+(scale*100).toFixed(0)+'%';
 }
 
-// Mouse handling
-canvas.addEventListener('mousedown', e => {
-  let rect = canvas.getBoundingClientRect();
-  let mx = Math.round((e.clientX - rect.left) / scale);
-  let my = Math.round((e.clientY - rect.top) / scale);
-
-  // find component under cursor (topmost first)
-  let found = -1;
-  for (let i = scr().components.length-1; i>=0; i--) {
-    let c = scr().components[i];
-    let w = c.w || (c.tx?c.tx:100), h = c.h || 30;
-    if (mx>=c.x && mx<=c.x+w && my>=c.y && my<=c.y+h) { found = i; break; }
+// ------- MOUSE --------
+canvas.addEventListener('mousedown',e=>{
+  let rect=canvas.getBoundingClientRect();
+  let mx=Math.round((e.clientX-rect.left)/scale),my=Math.round((e.clientY-rect.top)/scale);
+  let found=-1;
+  for(let i=S().components.length-1;i>=0;i--){
+    let c=C(i),w=c.w||100,h=c.h||30;
+    if(mx>=c.x&&mx<=c.x+w&&my>=c.y&&my<=c.y+h){found=i;break;}
   }
-  if (found >= 0) {
-    selectedIdx = found;
-    rebuildCompList();
-    redraw();
-    if (e.shiftKey) {
-      // find which edge is closest
-      let c = scr().components[found];
-      dragComp = { idx: found, mode: 'resize', edge: mx < c.x+c.w/2 ? 'l' : 'r' };
-    } else {
-      dragComp = { idx: found, mode: 'move' };
-    }
-    dragStart = { x: mx, y: my };
-    dragOrig = { x: scr().components[found].x, y: scr().components[found].y, w: scr().components[found].w, h: scr().components[found].h };
+  if(found>=0){
+    selIdx=found;rebuildCompList();redraw();buildProps();
+    drag={idx:found,mode:e.shiftKey?'resize':'move'};
+    dStart={x:mx,y:my};
+    dOrig={x:C().x,y:C().y,w:C().w||100,h:C().h||30};
   }
   e.preventDefault();
 });
 
-canvas.addEventListener('mousemove', e => {
-  if (!dragComp) return;
-  let rect = canvas.getBoundingClientRect();
-  let mx = Math.round((e.clientX - rect.left) / scale);
-  let my = Math.round((e.clientY - rect.top) / scale);
-  let dx = mx - dragStart.x;
-  let dy = my - dragStart.y;
-  let c = scr().components[dragComp.idx];
-
-  if (dragComp.mode === 'move') {
-    c.x = Math.max(0, Math.min(CANVAS_W-10, dragOrig.x + dx));
-    c.y = Math.max(0, Math.min(CANVAS_H-10, dragOrig.y + dy));
-  } else if (dragComp.mode === 'resize') {
-    if (dragComp.edge === 'r') {
-      c.w = Math.max(20, dragOrig.w + dx);
-      c.h = Math.max(10, dragOrig.h + dy);
-    } else {
-      let nw = Math.max(20, dragOrig.w - dx);
-      c.x = dragOrig.x + dragOrig.w - nw;
-      c.w = nw;
-      c.h = Math.max(10, dragOrig.h + dy);
-}
-    } else if (c.type === 'image') {
-      if (c._data) {
-        let img = new Image();
-        img.src = c._data;
-        ctx.drawImage(img, c.x, c.y, c.w||100, c.h||100);
-      } else {
-        ctx.fillStyle = 'rgba(20,20,40,0.8)';
-        ctx.fillRect(c.x, c.y, c.w||100, c.h||100);
-        ctx.strokeStyle = '#448';
-        ctx.strokeRect(c.x, c.y, c.w||100, c.h||100);
-        ctx.fillStyle = '#88f';
-        ctx.font = '12px monospace';
-        ctx.fillText('IMG', c.x+10, c.y+24);
-      }
-      if (c.src) {
-        ctx.fillStyle = '#aaa';
-        ctx.font = '9px monospace';
-        let name = c.src.split('/').pop().substring(0,20);
-        ctx.fillText(name, c.x+4, c.y+(c.h||100)-4);
-      }
-    }
+canvas.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  let rect=canvas.getBoundingClientRect();
+  let mx=Math.round((e.clientX-rect.left)/scale),my=Math.round((e.clientY-rect.top)/scale);
+  let dx=mx-dStart.x,dy=my-dStart.y,c=C(drag.idx);
+  if(drag.mode==='move'){
+    c.x=Math.max(0,Math.min(CW-10,dOrig.x+dx));
+    c.y=Math.max(0,Math.min(CH-10,dOrig.y+dy));
+  }else{
+    c.w=Math.max(20,dOrig.w+dx);
+    c.h=Math.max(10,dOrig.h+dy);
+  }
   redraw();
 });
 
-canvas.addEventListener('mouseup', () => {
-  if (dragComp) { save(); redraw(); }
-  dragComp = null;
-});
+canvas.addEventListener('mouseup',()=>{if(drag){save();}drag=null;});
 
-// Keyboard
-document.addEventListener('keydown', e => {
-  if (e.key === 'Delete' && selectedIdx>=0) {
-    deleteSelected();
+document.addEventListener('keydown',e=>{
+  if(e.key==='Delete'&&selIdx>=0){delComp();e.preventDefault();}
+  if(e.key.startsWith('Arrow')&&selIdx>=0&&!e.shiftKey){
+    let c=C();
+    if(e.key==='ArrowUp')c.y--;if(e.key==='ArrowDown')c.y++;
+    if(e.key==='ArrowLeft')c.x--;if(e.key==='ArrowRight')c.x++;
+    redraw();save();buildProps();
     e.preventDefault();
   }
-  if (e.key === 'ArrowUp' && selectedIdx>=0 && !e.shiftKey) {
-    scr().components[selectedIdx].y -= 1; redraw(); save();
-  }
-  if (e.key === 'ArrowDown' && selectedIdx>=0 && !e.shiftKey) {
-    scr().components[selectedIdx].y += 1; redraw(); save();
-  }
-  if (e.key === 'ArrowLeft' && selectedIdx>=0 && !e.shiftKey) {
-    scr().components[selectedIdx].x -= 1; redraw(); save();
-  }
-  if (e.key === 'ArrowRight' && selectedIdx>=0 && !e.shiftKey) {
-    scr().components[selectedIdx].x += 1; redraw(); save();
-  }
 });
 
-let _updateTimer = null;
-function updateProp(key, value) {
-  if (selectedIdx<0) return;
-  let c = scr().components[selectedIdx];
-  let parts = key.split('.');
-  if (parts.length > 1) {
-    // nested update e.g. fill.0
-    let arr = c[parts[0]];
-    arr = arr || [];
-    arr[parseInt(parts[1])] = parseFloat(value);
-    c[parts[0]] = arr;
-  } else {
-    if (key==='text' || key==='icon' || key==='label' || key==='action') c[key] = value;
-    else if (['x','y','w','h','cols','cell_w','cell_h','gap','size','offsetX','offsetY'].includes(key)) c[key] = parseInt(value)||0;
+// ------- PROPS --------
+function updateProp(key,val){
+  if(selIdx<0)return;
+  let c=C(),parts=key.split('.');
+  if(parts.length>1){
+    let arr=c[parts[0]]||[];arr[parseInt(parts[1])]=parseFloat(val);c[parts[0]]=arr;
+  }else{
+    if(['text','icon','label','action','src'].includes(key))c[key]=val;
+    else c[key]=parseInt(val)||0;
   }
-  redraw();
-  if (_updateTimer) clearTimeout(_updateTimer);
-  _updateTimer = setTimeout(save, 300);
+  redraw();save();
 }
 
-function buildProps() {
-  let el = document.getElementById('props');
-  if (selectedIdx<0) { el.innerHTML = '<p style="color:#555">Selecciona un componente</p>'; return; }
-  let c = scr().components[selectedIdx];
-  let html = '<h3>'+c.type.toUpperCase()+'</h3>';
-  html += '<label>X <input type="number" value="'+c.x+'" oninput="updateProp(\'x\',this.value)"></label>';
-  html += '<label>Y <input type="number" value="'+c.y+'" oninput="updateProp(\'y\',this.value)"></label>';
-  if (c.type==='rect'||c.type==='label'||c.type==='image') {
-    html += '<label>W <input type="number" value="'+(c.w||100)+'" oninput="updateProp(\'w\',this.value)"></label>';
-    html += '<label>H <input type="number" value="'+(c.h||30)+'" oninput="updateProp(\'h\',this.value)"></label>';
+function updateGridItem(j,key,val){
+  let c=C();if(!c||c.type!=='grid')return;
+  c.items[j][key]=val;redraw();save();
+}
+
+function updateGridColor(j,idx,val){
+  let c=C();if(!c||c.type!=='grid')return;
+  if(!c.items[j].color)c.items[j].color=[100,200,255];
+  c.items[j].color[idx]=parseInt(val)||0;redraw();save();
+}
+
+function addGridItem(){
+  let c=C();if(!c||c.type!=='grid')return;
+  c.items.push({icon:'X',label:'Nuevo',color:[100,200,255],action:''});
+  redraw();save();buildProps();
+}
+
+function delGridItem(j){
+  let c=C();if(!c||c.type!=='grid')return;
+  c.items.splice(j,1);redraw();save();buildProps();
+}
+
+function buildProps(){
+  let el=document.getElementById('props');
+  if(selIdx<0){el.innerHTML='<p style="color:#555">Selecciona un componente</p>';return;}
+  let c=C(),h='';
+  h+='<h3>'+c.type.toUpperCase()+'</h3>';
+  h+='<div class="row"><span>X</span><input type="number" value="'+c.x+'" onchange="updateProp(\'x\',this.value)"> <span>Y</span><input type="number" value="'+c.y+'" onchange="updateProp(\'y\',this.value)"></div>';
+  if(c.type==='rect'||c.type==='image'||c.type==='button'||c.type==='label'){
+    h+='<div class="row"><span>W</span><input type="number" value="'+(c.w||100)+'" onchange="updateProp(\'w\',this.value)"> <span>H</span><input type="number" value="'+(c.h||30)+'" onchange="updateProp(\'h\',this.value)"></div>';
   }
-  if (c.type==='image') {
-    html += '<label>Archivo <input value="'+(c.src||'')+'" oninput="updateProp(\'src\',this.value)" placeholder="img/logo.png"></label>';
-    html += '<label style="color:#8af">Las imágenes se guardan en img/ al exportar</label>';
-    html += '<button onclick="pickImageFile()" style="width:100%;margin-top:4px">📁 Elegir de esta PC</button>';
-    html += '<input type="file" id="imageFileInput" accept="image/*" style="display:none" onchange="onImagePicked(event)">';
+  if(c.type==='rect'){
+    h+='<label>Relleno RGB <div class="row"><input type="number" value="'+(c.fill?c.fill[0]:40)+'" onchange="updateProp(\'fill.0\',this.value)"><input type="number" value="'+(c.fill?c.fill[1]:40)+'" onchange="updateProp(\'fill.1\',this.value)"><input type="number" value="'+(c.fill?c.fill[2]:60)+'" onchange="updateProp(\'fill.2\',this.value)"></div></label>';
   }
-  if (c.type==='rect') {
-    html += '<label>Color relleno <div class="row">R<input type="number" value="'+(c.fill?c.fill[0]:40)+'" oninput="updateProp(\'fill.0\',this.value)">G<input type="number" value="'+(c.fill?c.fill[1]:40)+'" oninput="updateProp(\'fill.1\',this.value)">B<input type="number" value="'+(c.fill?c.fill[2]:60)+'" oninput="updateProp(\'fill.2\',this.value)"></div></label>';
+  if(c.type==='text'||c.type==='label'||c.type==='button'){
+    if(c.type==='button')h+='<label>Texto <input value="'+(c.text||'')+'" onchange="updateProp(\'text\',this.value)"></label>';
+    else h+='<label>Texto <input value="'+(c.text||'')+'" onchange="updateProp(\'text\',this.value)"></label>';
+    h+='<label>Tamaño <input type="number" value="'+(c.size||14)+'" onchange="updateProp(\'size\',this.value)"></label>';
+    if(c.type==='button')h+='<label>Acción <input value="'+(c.action||'')+'" onchange="updateProp(\'action\',this.value)"></label>';
+    h+='<label>Color RGB <div class="row"><input type="number" value="'+(c.color?c.color[0]:255)+'" onchange="updateProp(\'color.0\',this.value)"><input type="number" value="'+(c.color?c.color[1]:255)+'" onchange="updateProp(\'color.1\',this.value)"><input type="number" value="'+(c.color?c.color[2]:255)+'" onchange="updateProp(\'color.2\',this.value)"></div></label>';
   }
-  if (c.type==='text'||c.type==='label') {
-    html += '<label>Texto <input value="'+(c.text||'').replace(/"/g,'&quot;')+'" oninput="updateProp(\'text\',this.value)"></label>';
-    html += '<label>Tamaño <input type="number" value="'+(c.size||14)+'" oninput="updateProp(\'size\',this.value)"></label>';
-    html += '<label>Color <div class="row">R<input type="number" value="'+(c.color?c.color[0]:255)+'" oninput="updateProp(\'color.0\',this.value)">G<input type="number" value="'+(c.color?c.color[1]:255)+'" oninput="updateProp(\'color.1\',this.value)">B<input type="number" value="'+(c.color?c.color[2]:255)+'" oninput="updateProp(\'color.2\',this.value)"></div></label>';
+  if(c.type==='image'){
+    h+='<label>Ruta <input value="'+(c.src||'')+'" onchange="updateProp(\'src\',this.value)" placeholder="img/foto.png"></label>';
+    h+='<button onclick="pickImage()">📁 Elegir de esta PC</button>';
+    h+='<input type="file" id="imgFile" accept="image/*" style="display:none" onchange="onImgPicked(event)">';
   }
-  if (c.type==='grid') {
-    html += '<label>Columnas <input type="number" value="'+c.cols+'" oninput="updateProp(\'cols\',this.value)"></label>';
-    html += '<label>Ancho celda <input type="number" value="'+c.cell_w+'" oninput="updateProp(\'cell_w\',this.value)"></label>';
-    html += '<label>Alto celda <input type="number" value="'+c.cell_h+'" oninput="updateProp(\'cell_h\',this.value)"></label>';
-    html += '<label>Espacio <input type="number" value="'+c.gap+'" oninput="updateProp(\'gap\',this.value)"></label>';
-    html += '<h3>ITEMS ('+c.items.length+')</h3>';
-    html += '<button onclick="addGridItem()" style="width:100%">+ Item</button>';
-    c.items.forEach((item,j) => {
-      html += '<div class="comp-item" style="margin:2px 0;padding:4px">'+j+': <input value="'+(item.icon||'')+'" style="width:30px" oninput="updateGridItem('+j+',\'icon\',this.value)"> <input value="'+(item.label||'')+'" style="width:60px" oninput="updateGridItem('+j+',\'label\',this.value)"> <input value="'+(item.action||'')+'" style="width:50px" oninput="updateGridItem('+j+',\'action\',this.value)" placeholder="action"><span class="del" onclick="delGridItem('+j+')">✕</span></div>';
+  if(c.type==='grid'){
+    h+='<div class="row"><span>Cols</span><input type="number" value="'+c.cols+'" onchange="updateProp(\'cols\',this.value)"> <span>CW</span><input type="number" value="'+c.cell_w+'" onchange="updateProp(\'cell_w\',this.value)"></div>';
+    h+='<div class="row"><span>CH</span><input type="number" value="'+c.cell_h+'" onchange="updateProp(\'cell_h\',this.value)"> <span>Gap</span><input type="number" value="'+c.gap+'" onchange="updateProp(\'gap\',this.value)"></div>';
+    h+='<h3>ITEMS ('+c.items.length+') <button onclick="addGridItem()">+</button></h3>';
+    c.items.forEach((item,j)=>{
+      let clr=item.color||[100,200,255];
+      h+='<div class="comp-item">'+j+
+        ': <input value="'+(item.icon||'')+'" onchange="updateGridItem('+j+',\'icon\',this.value)" title="icono">'+
+        ' <input value="'+(item.label||'')+'" onchange="updateGridItem('+j+',\'label\',this.value)" title="nombre" style="width:50px!important">'+
+        ' <input value="'+(item.action||'')+'" onchange="updateGridItem('+j+',\'action\',this.value)" title="accion" style="width:40px!important">'+
+        ' <input type="number" value="'+clr[0]+'" onchange="updateGridColor('+j+',0,this.value)" title="R" style="width:35px!important">'+
+        '<input type="number" value="'+clr[1]+'" onchange="updateGridColor('+j+',1,this.value)" title="G" style="width:35px!important">'+
+        '<input type="number" value="'+clr[2]+'" onchange="updateGridColor('+j+',2,this.value)" title="B" style="width:35px!important">'+
+        '<span class="del" onclick="delGridItem('+j+')">&times;</span></div>';
     });
   }
-  el.innerHTML = html;
+  el.innerHTML=h;
 }
 
-function addGridItem() {
-  if (selectedIdx<0) return;
-  let c = scr().components[selectedIdx];
-  if (c.type!=='grid') return;
-  c.items.push({icon:'X',label:'Nuevo',color:[100,200,255],action:''});
-  redraw(); save(); buildProps();
-}
-
-function updateGridItem(j, key, val) {
-  let c = scr().components[selectedIdx];
-  c.items[j][key] = val;
-  redraw(); save();
-}
-
-function delGridItem(j) {
-  let c = scr().components[selectedIdx];
-  c.items.splice(j,1);
-  redraw(); save(); buildProps();
-}
-
-function save() {
-  localStorage.setItem('motomami_ui', JSON.stringify(data));
-  rebuildCompList();
-  buildProps();
-}
-
-function pickImageFile() {
-  document.getElementById('imageFileInput').click();
-}
-
-function onImagePicked(e) {
-  if (selectedIdx<0) return;
-  let file = e.target.files[0];
-  if (!file) return;
-  let reader = new FileReader();
-  reader.onload = function(ev) {
-    let c = scr().components[selectedIdx];
-    let ext = file.name.split('.').pop().toLowerCase();
-    let baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-    c.src = 'img/' + baseName + '.' + ext;
-    c._data = ev.target.result;
-    c._ext = ext;
-    redraw(); save(); buildProps();
+function pickImage(){document.getElementById('imgFile').click();}
+function onImgPicked(e){
+  if(selIdx<0||!e.target.files[0])return;
+  let f=e.target.files[0],r=new FileReader();
+  r.onload=function(ev){
+    let c=C();
+    let ext=f.name.split('.').pop().toLowerCase();
+    let base=f.name.replace(/\.[^.]+$/,'').replace(/[^a-zA-Z0-9_-]/g,'_');
+    let key='img/'+base+'.'+ext;
+    c.src=key;c._data=ev.target.result;c._ext=ext;
+    let img=new Image();
+    img.onload=function(){imgCache[key]=img;redraw();};
+    img.src=ev.target.result;
+    redraw();save();buildProps();
   };
-  reader.readAsDataURL(file);
+  r.readAsDataURL(f);
 }
 
-function exportJSON() {
-  // Prepara JSON limpio con imágenes en base64 embebidas
-  let clean = JSON.parse(JSON.stringify(data));
-  let images = {};
-  // Recoge imágenes de todas las pantallas
-  for (let screenName in clean.screens) {
-    let comps = clean.screens[screenName].components;
-    for (let c of comps) {
-      if (c.type === 'image' && c._data && c.src) {
-        // guarda base64 sin el prefijo data:...
-        let b64 = c._data.split(',')[1] || c._data;
-        images[c.src] = b64;
-        delete c._data;
+// ------- IO --------
+function save(){localStorage.setItem('motomami_ui_v2',JSON.stringify(data));}
+
+function exportJSON(){
+  let clean=JSON.parse(JSON.stringify(data));
+  let images={};
+  for(let sn in clean.screens){
+    clean.screens[sn].components.forEach(c=>{
+      if(c.type==='image'&&c._data&&c.src){
+        let b64=c._data.split(',')[1]||c._data;
+        images[c.src]=b64;delete c._data;
       }
-    }
+    });
   }
-  clean._images = images;
-  let json = JSON.stringify(clean, null, 2);
-  let blob = new Blob([json], {type:'application/json'});
-  let a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'motomami_ui.json';
-  a.click();
-  alert('JSON exportado con ' + Object.keys(images).length + ' imágenes embebidas.\n\nEn la RPi ejecuta:\npython3 tools/install_ui.py motomami_ui.json');
+  clean._images=images;
+  let blob=new Blob([JSON.stringify(clean,null,2)],{type:'application/json'});
+  let a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='motomami_ui.json';a.click();
+  alert('Exportado con '+Object.keys(images).length+' imagenes.\n\nEn la RPi:\npython3 tools/install_ui.py motomami_ui.json');
 }
 
-function importJSON() {
-  let input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.onchange = e => {
-    let f = e.target.files[0];
-    if (!f) return;
-    let reader = new FileReader();
-    reader.onload = ev => {
-      try {
-        data = JSON.parse(ev.target.result);
-        if (!data.screens) { alert('Formato inválido'); return; }
-        currentScreen = Object.keys(data.screens)[0];
-        selectedIdx = -1;
-        rebuildScreenList();
-        rebuildCompList();
-        redraw();
-        save();
-      } catch(ex) { alert('JSON inválido: '+ex.message); }
+function importJSON(){
+  let inp=document.createElement('input');inp.type='file';inp.accept='.json';
+  inp.onchange=e=>{
+    let f=e.target.files[0];if(!f)return;
+    let r=new FileReader();
+    r.onload=ev=>{
+      try{
+        let d=JSON.parse(ev.target.result);
+        if(!d.screens){alert('Formato invalido');return;}
+        // merge images back
+        if(d._images){
+          for(let path in d._images){
+            for(let sn in d.screens){
+              d.screens[sn].components.forEach(c=>{
+                if(c.type==='image'&&c.src===path){c._data='data:image/png;base64,'+d._images[path];}
+              });
+            }
+          }
+          delete d._images;
+        }
+        data=d;current=Object.keys(data.screens)[0];selIdx=-1;
+        rebuildScreenList();rebuildCompList();redraw();save();
+      }catch(ex){alert('JSON invalido: '+ex.message);}
     };
-    reader.readAsText(f);
+    r.readAsText(f);
   };
-  input.click();
+  inp.click();
 }
 
-window.addEventListener('load', init);
-window.addEventListener('resize', redraw);
+window.addEventListener('load',init);
+window.addEventListener('resize',redraw);
 </script>
 </body>
 </html>
