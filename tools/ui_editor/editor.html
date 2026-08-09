@@ -340,13 +340,19 @@ canvas.addEventListener('mousemove', e => {
       c.h = Math.max(10, dragOrig.h + dy);
 }
     } else if (c.type === 'image') {
-      ctx.fillStyle = 'rgba(20,20,40,0.8)';
-      ctx.fillRect(c.x, c.y, c.w||100, c.h||100);
-      ctx.strokeStyle = '#448';
-      ctx.strokeRect(c.x, c.y, c.w||100, c.h||100);
-      ctx.fillStyle = '#88f';
-      ctx.font = '12px monospace';
-      ctx.fillText('IMG', c.x+10, c.y+24);
+      if (c._data) {
+        let img = new Image();
+        img.src = c._data;
+        ctx.drawImage(img, c.x, c.y, c.w||100, c.h||100);
+      } else {
+        ctx.fillStyle = 'rgba(20,20,40,0.8)';
+        ctx.fillRect(c.x, c.y, c.w||100, c.h||100);
+        ctx.strokeStyle = '#448';
+        ctx.strokeRect(c.x, c.y, c.w||100, c.h||100);
+        ctx.fillStyle = '#88f';
+        ctx.font = '12px monospace';
+        ctx.fillText('IMG', c.x+10, c.y+24);
+      }
       if (c.src) {
         ctx.fillStyle = '#aaa';
         ctx.font = '9px monospace';
@@ -415,8 +421,9 @@ function buildProps() {
   }
   if (c.type==='image') {
     html += '<label>Archivo <input value="'+(c.src||'')+'" oninput="updateProp(\'src\',this.value)" placeholder="img/logo.png"></label>';
-    html += '<label style="color:#8af">Las imágenes van en /home/motomami/moto/img/</label>';
-    html += '<button onclick="pickImage()" style="width:100%;margin-top:4px">📁 Seleccionar archivo local</button>';
+    html += '<label style="color:#8af">Las imágenes se guardan en img/ al exportar</label>';
+    html += '<button onclick="pickImageFile()" style="width:100%;margin-top:4px">📁 Elegir de esta PC</button>';
+    html += '<input type="file" id="imageFileInput" accept="image/*" style="display:none" onchange="onImagePicked(event)">';
   }
   if (c.type==='rect') {
     html += '<label>Color relleno <div class="row">R<input type="number" value="'+(c.fill?c.fill[0]:40)+'" oninput="updateProp(\'fill.0\',this.value)">G<input type="number" value="'+(c.fill?c.fill[1]:40)+'" oninput="updateProp(\'fill.1\',this.value)">B<input type="number" value="'+(c.fill?c.fill[2]:60)+'" oninput="updateProp(\'fill.2\',this.value)"></div></label>';
@@ -466,20 +473,51 @@ function save() {
   buildProps();
 }
 
-function pickImage() {
+function pickImageFile() {
+  document.getElementById('imageFileInput').click();
+}
+
+function onImagePicked(e) {
   if (selectedIdx<0) return;
-  let c = scr().components[selectedIdx];
-  let name = prompt('Ruta de la imagen en la RPi:\nej: /home/motomami/moto/img/logo.png\nej: img/doom_bg.jpg', c.src || 'img/');
-  if (name) { c.src = name; redraw(); save(); buildProps(); }
+  let file = e.target.files[0];
+  if (!file) return;
+  let reader = new FileReader();
+  reader.onload = function(ev) {
+    let c = scr().components[selectedIdx];
+    let ext = file.name.split('.').pop().toLowerCase();
+    let baseName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    c.src = 'img/' + baseName + '.' + ext;
+    c._data = ev.target.result;
+    c._ext = ext;
+    redraw(); save(); buildProps();
+  };
+  reader.readAsDataURL(file);
 }
 
 function exportJSON() {
-  let json = JSON.stringify(data, null, 2);
+  // Prepara JSON limpio con imágenes en base64 embebidas
+  let clean = JSON.parse(JSON.stringify(data));
+  let images = {};
+  // Recoge imágenes de todas las pantallas
+  for (let screenName in clean.screens) {
+    let comps = clean.screens[screenName].components;
+    for (let c of comps) {
+      if (c.type === 'image' && c._data && c.src) {
+        // guarda base64 sin el prefijo data:...
+        let b64 = c._data.split(',')[1] || c._data;
+        images[c.src] = b64;
+        delete c._data;
+      }
+    }
+  }
+  clean._images = images;
+  let json = JSON.stringify(clean, null, 2);
   let blob = new Blob([json], {type:'application/json'});
   let a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'motomami_ui.json';
   a.click();
+  alert('JSON exportado con ' + Object.keys(images).length + ' imágenes embebidas.\n\nEn la RPi ejecuta:\npython3 tools/install_ui.py motomami_ui.json');
 }
 
 function importJSON() {
