@@ -66,7 +66,11 @@ function S(){return data.screens[current];}
 function C(i){return S().components[i!=null?i:selIdx];}
 
 function init(){
-  let s=localStorage.getItem('motomami_ui_v2');
+  let s=localStorage.getItem('motomami_ui_v3');
+  // limpiar versiones viejas que puedan estar corruptas
+  localStorage.removeItem('motomami_ui_v2');
+  localStorage.removeItem('motomami_ui_v2b');
+  localStorage.removeItem('motomami_ui_v2c');
   if(s)try{data=JSON.parse(s)}catch(e){}
   if(!data||!data.screens||!Object.keys(data.screens).length){
     data={screens:{"main_menu":{bg:[10,0,10],components:[
@@ -425,7 +429,13 @@ function onImgPicked(e){
 }
 
 // ------- IO --------
-function save(){localStorage.setItem('motomami_ui_v2',JSON.stringify(data));}
+function save(){
+  let clean=JSON.parse(JSON.stringify(data));
+  for(let sn in clean.screens){
+    clean.screens[sn].components.forEach(c=>{if(c._data)delete c._data;});
+  }
+  localStorage.setItem('motomami_ui_v3',JSON.stringify(clean));
+}
 
 function exportJSON(){
   let clean=JSON.parse(JSON.stringify(data));
