@@ -300,22 +300,22 @@ canvas.addEventListener('mousedown',e=>{
   e.preventDefault();
 });
 
-canvas.addEventListener('mousemove',e=>{
+canvas.addEventListener('mousemove',e=>{if(drag)e.preventDefault();});
+
+document.addEventListener('mousemove',e=>{
   if(!drag)return;
   let rect=canvas.getBoundingClientRect();
   let mx=Math.round((e.clientX-rect.left)/scale),my=Math.round((e.clientY-rect.top)/scale);
   let dx=mx-dStart.x,dy=my-dStart.y,c=C(drag.idx);
-  if(drag.mode==='move'){
-    c.x=Math.max(0,Math.min(CW-10,dOrig.x+dx));
-    c.y=Math.max(0,Math.min(CH-10,dOrig.y+dy));
-  }else{
-    c.w=Math.max(20,dOrig.w+dx);
-    c.h=Math.max(10,dOrig.h+dy);
-  }
+  if(drag.mode==='move'){c.x=Math.max(0,Math.min(CW-10,dOrig.x+dx));c.y=Math.max(0,Math.min(CH-10,dOrig.y+dy));}
+  else{c.w=Math.max(20,dOrig.w+dx);c.h=Math.max(10,dOrig.h+dy);}
   redraw();
 });
 
-canvas.addEventListener('mouseup',()=>{if(drag){save();}drag=null;});
+document.addEventListener('mouseup',e=>{
+  if(drag){save();redraw();}
+  drag=null;
+});
 
 document.addEventListener('keydown',e=>{
   if(e.key==='Delete'&&selIdx>=0){delComp();e.preventDefault();}
