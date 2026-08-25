@@ -10,6 +10,7 @@
 #include "esp_wifi.h"
 #include "esp_timer.h"
 #include "mqtt_client.h"
+#include "esp_now.h"
 #include "ota_server.h"
 
 /* ================================================================
@@ -22,6 +23,9 @@
 #define WIFI_RETRY_US      (1000 * 1000)   /* backoff 1 s al reconectar WiFi */
 #define MQTT_RECONNECT_MS  1000            /* reconexion MQTT rapida */
 
+#define ESPNOW_CHANNEL    6
+#define ESPNOW_REFRESH_MS 150
+
 /* ================================================================
    ESTADO GLOBAL
    ================================================================ */
@@ -33,6 +37,11 @@ static esp_timer_handle_t wifi_retry_timer = NULL;
 
 /* Contador de mensajes publicados (parametro de control "ID") */
 static uint32_t msg_id = 0;
+
+static uint8_t espnow_broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+#define WDT_TIMEOUT_US (5 * 1000 * 1000)
+static volatile int64_t wdt_last_kick_us = 0;
 
 /* ================================================================
    GPIO INPUTS (5 entradas optoacopladas)
@@ -102,15 +111,77 @@ static void publish_all_state(void) {
     esp_mqtt_client_publish(mqtt_client, "motomami-input/data", payload, 0, 1, 1);
 }
 
+static void wdt_timer_cb(void *arg)
+{
+    (void)arg;
+    if ((esp_timer_get_time() - wdt_last_kick_us) > WDT_TIMEOUT_US) {
+        ESP_LOGE(TAG, "WDT: bucle principal colgado, reiniciando");
+        esp_restart();
+    }
+}
+
+static uint32_t espnow_next_id(void)
+{
+    portENTER_CRITICAL(&buf_mux);
+    uint32_t id = ++msg_id;
+    portEXIT_CRITICAL(&buf_mux);
+    return id;
+}
+
+static void espnow_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
+{
+    (void)tx_info;
+    if (status != ESP_NOW_SEND_SUCCESS) {
+        ESP_LOGW(TAG, "ESP-NOW envio fallido");
+    }
+}
+
+static void espnow_send_state(void)
+{
+    char payload[24];
+    snprintf(payload, sizeof(payload), "%lu:%d%d%d%d%d", espnow_next_id(),
+        gpio_get_level(in_pins[0]), gpio_get_level(in_pins[1]),
+        gpio_get_level(in_pins[2]), gpio_get_level(in_pins[3]),
+        gpio_get_level(in_pins[4]));
+    esp_now_send(espnow_broadcast_mac, (const uint8_t *)payload, strlen(payload));
+}
+
+static void espnow_init(void)
+{
+    esp_err_t err = esp_wifi_set_channel(ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "set_channel %d: %s", ESPNOW_CHANNEL, esp_err_to_name(err));
+    }
+    err = esp_now_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_now_init: %s (ESP-NOW desactivado)", esp_err_to_name(err));
+        return;
+    }
+    esp_now_register_send_cb(espnow_send_cb);
+    esp_now_peer_info_t peer = {0};
+    memcpy(peer.peer_addr, espnow_broadcast_mac, ESP_NOW_ETH_ALEN);
+    peer.channel = ESPNOW_CHANNEL;
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+    esp_now_add_peer(&peer);
+    ESP_LOGI(TAG, "ESP-NOW listo (broadcast, canal %d)", ESPNOW_CHANNEL);
+}
+
 static void input_task(void *pv) {
     TickType_t last = xTaskGetTickCount();
     TickType_t last_data_pub = 0;
+    TickType_t last_espnow = 0;
     while (1) {
+        wdt_last_kick_us = esp_timer_get_time();
         vTaskDelayUntil(&last, pdMS_TO_TICKS(POLL_MS));
         TickType_t now = xTaskGetTickCount();
         if (now - last_data_pub >= pdMS_TO_TICKS(300)) {
             last_data_pub = now;
             publish_all_state();
+        }
+        if (now - last_espnow >= pdMS_TO_TICKS(ESPNOW_REFRESH_MS)) {
+            last_espnow = now;
+            espnow_send_state();
         }
         for (int i = 0; i < PIN_COUNT; i++) {
             int r = gpio_get_level(in_pins[i]);
@@ -121,6 +192,7 @@ static void input_task(void *pv) {
                     buffer_push(i, r);
                     buffer_flush();
                     publish_all_state();
+                    espnow_send_state();
                 }
             }
             in_last_reading[i] = r;
@@ -215,6 +287,7 @@ static void wifi_retry_cb(void *arg)
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (id == WIFI_EVENT_STA_START) {
+        espnow_init();
         esp_wifi_connect();
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         /* backoff corto para no reconectar en rafaga si el AP esta caido */
@@ -297,6 +370,11 @@ void app_main(void)
         in_last_debounce[i] = 0;
     }
     xTaskCreate(input_task, "input_task", 4096, NULL, 10, NULL);
+
+    esp_timer_create_args_t wdt_args = { .callback = wdt_timer_cb, .name = "sw_wdt" };
+    esp_timer_handle_t wdt_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&wdt_args, &wdt_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(wdt_timer, 1000 * 1000));
 
     wifi_init();
 

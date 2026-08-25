@@ -325,3 +325,37 @@ El panel input (320x80, abajo derecha) ahora muestra:
 - El periodo de velocidad usa media movil simple 3/4 para reducir saltos; el payload agrega `dt` en milisegundos.
 - Monitor visual actualizado con tarjetas de velocidad, recorrido en m/km, odometro, pulsos, sensor, RSSI, IP e ID; colores derivados del tema para mejor contraste en modo dia.
 - Verificacion MQTT en RPi: `status online`, `ip 192.168.42.17`, RSSI y payload `s/d/m/o/p` recibidos.
+
+---
+
+## Session 2026-08-24 -- Control por ESP-NOW (luz trasera) + fix crash-loop
+
+### Migrado: input ↔ direccionales a ESP-NOW (control directo)
+
+- **Diseño validado y documentado**: `docs/plans/esp-now-control-design.md` (Decision Log completo) + `docs/plans/2026-08-24-esp-now-control.md` (plan de implementación).
+- **Protocolo**: broadcast en canal WiFi **6** fijo (coincide con Motomami-net), payload `"<msg_id>:LLLLL"` (L=izq, R=der, E=emerg, B=freno, N=nocturna; `'0'`=activo). Input envía al instante en cada cambio de pin + refresco cada **150 ms**.
+- **Input** (`Motomami-input-esp32c6/src/main.c`): `esp_now_init()` + peer broadcast, `espnow_send_state()`, SW WDT 5 s (`esp_timer` + `esp_restart()`). MQTT intacto (status/data para monitor RPi).
+- **Direccionales** (`Motomami-direccionales-esp32c6/main/main.c`): callback `espnow_recv_cb` (dedupe por `msg_id`, tolerancia `-10000` a reboot del emisor), SW WDT 5 s, `rmt_tx_wait_all_done` con timeout 500 ms + restart. **Se eliminaron las 5 suscripciones MQTT de control** (quedan solo `luz_nocturna/intensidad` e `intensidad`). Se agregó `esp_driver_gpio` a PRIV_REQUIRES.
+- **Sin enlace ESP-NOW → mantener último estado** (decisión del usuario; cubierto por SW WDT del input).
+- **RPi sin cambios** (`mqtt_listener.py` intacto): el input sigue publicando `motomami-input/data` y los topics de control.
+
+### Bug encontrado y corregido: crash-loop por `esp_now_init()` mal ubicado
+
+- El primer intento inicializaba ESP-NOW justo después de `esp_wifi_start()` con `ESP_ERROR_CHECK(esp_wifi_set_channel(...))` → el WiFi aún no está listo → abort → reboot → el bootloader anti-rollback revertía al firmware anterior (síntoma: módulo "muerto" tras OTA, ni siquiera aparece como station WiFi).
+- **Fix**: inicializar ESP-NOW en el evento `WIFI_EVENT_STA_START` (cuando la interfaz está lista), con manejo de error suave (log + continuar, sin `ESP_ERROR_CHECK`).
+- **Lección**: nunca llamar `esp_wifi_set_channel`/`esp_now_init` sincrónicamente tras `esp_wifi_start()`; usar el event handler. Si un OTA deja el módulo en crash-loop, el bootloader anti-rollback puede revertir tras varios ciclos, pero lo confiable es flashear por USB serial (`esptool.py write-flash`) — con el módulo en modo download se recupera siempre.
+
+### Deploy / flasheo (2026-08-24)
+
+- **Entorno de build reparado**: faltaba el python env del IDF (`~/.espressif/python_env/idf6.0_py3.14_env`). Se reconstruyó con `idf_tools.py install-python-env` (junto al constraints) y se instalaron las tools con `idf_tools.py install --targets=esp32c6`. Helper: `tools/idf_build.ps1` (export del IDF + `idf.py`).
+- **IPs en Motomami-net**: input = `192.168.42.36`, direccionales = `192.168.42.46`, velocímetro = `192.168.42.17`.
+- **OTA**: PC en Motomami-net (`192.168.42.10`); si el AP no reenvía a la PC, usar la RPi como puente: servidor HTTP local en la PC (`python -m http.server 8000`) → RPi `curl` descarga → `POST /ota` al ESP con `X-OTA-Token: motomami-ota-2026`.
+- **Input recuperado por USB**: se conectó el input a la RPi (USB-C), la RPi lo ve en `/dev/ttyACM0`, y se flasheó con esptool desde la RPi (binarios en `/tmp/`): `write-flash 0x0 bootloader 0x8000 partitions 0xd000 ota_data 0x10000 firmware`. **esptool ya está instalado en la RPi.**
+- **Verificado**: input estable (WiFi/MQTT/OTA OK, 0 fallos de envío ESP-NOW), direccionales corriendo `v49b3c96-dirty`, **la luz trasera reacciona a los botones por ESP-NOW** (confirmado visualmente por el usuario; el direccionales ya no escucha MQTT de control, así que la reacción solo puede venir de ESP-NOW).
+
+### Notas técnicas
+
+- El version string de los builds (`v<hash>-dirty`) usa el último commit git del repo, no el working tree: dos builds distintos sin commit intermedio muestran el mismo hash (no usar el hash para distinguir firmwares; verificar por log serie o comportamiento).
+- AP Motomami-net: el RTL8192EU se cae a veces (wlan1 DOWN sin IP). Recuperar: `sudo ip link set wlan1 down && up && sudo systemctl restart hostapd` (o reseat físico).
+- MCP `ssh-motomami` corregido en `~/.config/opencode/opencode.json`: host `192.168.42.1` (AP, ruta actual) con password `Ktiarts123*/*` — **requiere reiniciar opencode para tomar efecto**. Hasta entonces se usó `ssh` directo con `SSH_ASKPASS` (script en `C:\Users\wenup\AppData\Local\Temp\opencode\askpass.cmd`).
+- **Pendiente**: diagnosticar velocímetro (fuera de alcance de esta sesión).
